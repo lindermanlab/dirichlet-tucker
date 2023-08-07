@@ -67,9 +67,9 @@ class DirichletTuckerDecomp:
 
     # Now implement the EM algorithm
     def e_step(self, X, mask, params):
-        """
+        """Compute posterior expected sufficient statistics of parameters.
+        
         X: (M, N, P) count tensor
-
         mask: (M,N) binary matrix specifying which epochs are held-out for
             which mice.
         """
@@ -81,38 +81,52 @@ class DirichletTuckerDecomp:
         # compute E[Z] given the observed and missing data
         relative_probs = jnp.einsum('ijk,mi,nj,kp->mnpijk', *params)
         relative_probs /= probs[..., None, None, None]
-        Ez = X_imp[:, :, :, None, None, None] * relative_probs
-        return Ez
+        E_Z = X_imp[:, :, :, None, None, None] * relative_probs
 
-    def _m_step_g(self, Ez):
-        M, N, P, K_M, K_N, K_P = Ez.shape
-        alpha_post = self.alpha + jnp.sum(Ez, axis=(0, 1, 2))
-        assert alpha_post.shape == (K_M, K_N, K_P)
+        # compute E[*] given E[Z]
+        E_G = jnp.sum(E_Z, axis=(0,1,2))
+        E_Psi = jnp.sum(E_Z, axis=(1,2,4,5))
+        E_Phi = jnp.sum(E_Z, axis=(0,2,3,5))
+        E_Theta = jnp.sum(E_Z, axis=(0,1,3,4)).T
+        return E_G, E_Psi, E_Phi, E_Theta
+
+    def _m_step_g(self, E_G):
+        """Maximize conditional distribution of core tensor.
+
+        E_G: (K_M, K_N, K_P)
+        """
+        alpha_post = self.alpha + E_G
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_psi(self, Ez):
-        M, N, P, K_M, K_N, K_P = Ez.shape
-        alpha_post = self.alpha + jnp.sum(Ez, axis=(1, 2, 4, 5))
-        assert alpha_post.shape == (M, K_M)
+    def _m_step_psi(self, E_Psi):
+        """Maximize conditional distribution of Psi factor.
+        
+        E_Psi: (M, K_M)
+        """
+        alpha_post = self.alpha + E_Psi
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_phi(self, Ez):
-        M, N, P, K_M, K_N, K_P = Ez.shape
-        alpha_post = self.alpha + jnp.sum(Ez, axis=(0, 2, 3, 5))
-        assert alpha_post.shape == (N, K_N)
+    def _m_step_phi(self, E_Phi):
+        """Maximize conditional distribution of Phi factor.
+        
+        E_Phi: (N, K_N)
+        """
+        alpha_post = self.alpha + E_Phi
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_theta(self, Ez):
-        M, N, P, K_M, K_N, K_P = Ez.shape
-        alpha_post = self.alpha + jnp.sum(Ez, axis=(0, 1, 3, 4)).T
-        assert alpha_post.shape == (K_P, P)
+    def _m_step_theta(self, E_Theta):
+        """Maximize conditional distribution of Phi factor.
+        
+        E_Theta: (K_P, P)
+        """
+        alpha_post = self.alpha + E_Theta
         return tfd.Dirichlet(alpha_post).mode()
 
-    def m_step(self, Ez):
-        G = self._m_step_g(Ez)
-        Psi = self._m_step_psi(Ez)
-        Phi = self._m_step_phi(Ez)
-        Theta = self._m_step_theta(Ez)
+    def m_step(self, E_G, E_Psi, E_Phi, E_Theta):
+        G = self._m_step_g(E_G)
+        Psi = self._m_step_psi(E_Psi)
+        Phi = self._m_step_phi(E_Phi)
+        Theta = self._m_step_theta(E_Theta)
         return G, Psi, Phi, Theta
 
     def heldout_log_likelihood(self, X, mask, params):
@@ -147,8 +161,8 @@ class DirichletTuckerDecomp:
 
         @jit
         def em_step(X, mask, params):
-            Ez = self.e_step(X, mask, params)
-            params = self.m_step(Ez)
+            E_params = self.e_step(X, mask, params)
+            params = self.m_step(*E_params)
             lp = self.log_prob(X, mask, params)
             return lp, params
 
