@@ -16,7 +16,7 @@ from tqdm.auto import trange
 import wandb
 import matplotlib.pyplot as plt
 
-from dtd.model import DirichletTuckerDecomp
+from dtd.model3d import DirichletTuckerDecomp
 
 def _get_subshape(X, axes: tuple=(0,)):
     """Return shape of X along specified axes."""

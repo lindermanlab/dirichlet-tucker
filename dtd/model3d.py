@@ -11,8 +11,8 @@ warnings.filterwarnings("ignore")
 class DirichletTuckerDecomp:
 
     def __init__(self, C, K_M, K_N, K_P, alpha=1.1):
-        """Initialize a Dirichlet-Tucker decomposition, as defined in the note
-        above.
+        """Dirichlet-Tucker decomposition of a 3d tensor with 2 batch dimension (m, n)
+        and 1 event dimension (p,). 
 
         C: total counts for each (m,n) slice of the data tensor
         K_M, K_N, K_P: dimension of factors for the M, N, and P axes, respectively.
