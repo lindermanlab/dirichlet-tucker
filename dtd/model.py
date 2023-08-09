@@ -10,16 +10,16 @@ warnings.filterwarnings("ignore")
 
 class DirichletTuckerDecomp:
 
-    def __init__(self, S, K_M, K_N, K_P, alpha=1.1):
+    def __init__(self, C, K_M, K_N, K_P, alpha=1.1):
         """Initialize a Dirichlet-Tucker decomposition, as defined in the note
         above.
 
-        S: total counts for each (m,n) slice of the data tensor
+        C: total counts for each (m,n) slice of the data tensor
         K_M, K_N, K_P: dimension of factors for the M, N, and P axes, respectively.
         alpha: concentration of Dirichlet prior. Assume shared by all axes.
 
         """
-        self.S = S
+        self.C = C
         self.K_M = K_M
         self.K_N = K_N
         self.K_P = K_P
@@ -55,14 +55,13 @@ class DirichletTuckerDecomp:
 
         key: jr.PRNGKey
         params: tuple of params
-        S: number of counts per slice X[m,n,:]
-
+        
         returns:
             X: (M, N, P) data tensor where shapes are determined by params.
         """
         # Sample data
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-        X = tfd.Multinomial(self.S, probs=probs).sample(seed=key)
+        X = tfd.Multinomial(self.C, probs=probs).sample(seed=key)
         return X
 
     # Now implement the EM algorithm
@@ -73,21 +72,16 @@ class DirichletTuckerDecomp:
         mask: (M,N) binary matrix specifying which epochs are held-out for
             which mice.
         """
-        # impute missing data (mask == 0)
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-        # X_imp = X.at[~mask].set(self.S * probs[~mask])
-        X_imp = jnp.where(mask[:, :, None], X, self.S * probs)
-
-        # compute E[Z] given the observed and missing data
-        relative_probs = jnp.einsum('ijk,mi,nj,kp->mnpijk', *params)
-        relative_probs /= probs[..., None, None, None]
-        E_Z = X_imp[:, :, :, None, None, None] * relative_probs
+        relative_probs = jnp.einsum('ijk,mi,nj,kp->ijkmnp', *params)
+        relative_probs /= probs
+        E_Z = X * mask[..., None] * relative_probs
 
         # compute alpha_* given E[Z]
-        alpha_G = jnp.sum(E_Z, axis=(0,1,2))
-        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4,5))
-        alpha_Phi = jnp.sum(E_Z, axis=(0,2,3,5))
-        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3,4)).T
+        alpha_G = jnp.sum(E_Z, axis=(3,4,5))
+        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4,5)).T
+        alpha_Phi = jnp.sum(E_Z, axis=(0,2,3,5)).T
+        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3,4))
         return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
 
     def _m_step_g(self, alpha_G):
@@ -132,9 +126,7 @@ class DirichletTuckerDecomp:
     def heldout_log_likelihood(self, X, mask, params):
         # TODO: Compute the log likelihood of the held-out entries in X
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-        # return tfd.Multinomial(S, probs=probs[~mask]).log_prob(X[~mask]).sum()
-        # return tfd.Masked(tfd.Multinomial(S, probs=probs), ~mask).log_prob(X).sum()
-        return jnp.where(~mask, tfd.Multinomial(self.S, probs=probs).log_prob(X), 0.0).sum()
+        return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs).log_prob(X), 0.0).sum()
 
     def log_prob(self, X, mask, params):
         M, N, P = X.shape
@@ -148,13 +140,11 @@ class DirichletTuckerDecomp:
 
         # log likelihood of observed data
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-        # lp += tfd.Multinomial(S, probs=probs[mask]).log_prob(X[mask]).sum()
-        # lp += tfd.Masked(tfd.Multinomial(S, probs=probs), mask).log_prob(X).sum()
-        lp += jnp.where(mask, tfd.Multinomial(self.S, probs=probs).log_prob(X), 0.0).sum()
+        lp += jnp.where(mask, tfd.Multinomial(self.C, probs=probs).log_prob(X), 0.0).sum()
         return lp
 
     def reconstruct(self, params):
-        return self.S * jnp.einsum('ijk, mi, nj, kp->mnp', *params)
+        return self.C * jnp.einsum('ijk, mi, nj, kp->mnp', *params)
 
     # Fit the model!
     def fit(self, X, mask, init_params, num_iters):
