@@ -15,7 +15,7 @@ from sklearn.metrics import confusion_matrix
 from tensorflow_probability.substrates import jax as tfp
 from tqdm.auto import trange
 
-from dtd.model import DirichletTuckerDecomp
+from dtd.model3d import DirichletTuckerDecomp
 
 tfd = tfp.distributions
 DATA_DIREC = "/home/groups/swl1/swl1"
