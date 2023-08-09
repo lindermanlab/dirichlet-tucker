@@ -83,50 +83,50 @@ class DirichletTuckerDecomp:
         relative_probs /= probs[..., None, None, None]
         E_Z = X_imp[:, :, :, None, None, None] * relative_probs
 
-        # compute E[*] given E[Z]
-        E_G = jnp.sum(E_Z, axis=(0,1,2))
-        E_Psi = jnp.sum(E_Z, axis=(1,2,4,5))
-        E_Phi = jnp.sum(E_Z, axis=(0,2,3,5))
-        E_Theta = jnp.sum(E_Z, axis=(0,1,3,4)).T
-        return E_G, E_Psi, E_Phi, E_Theta
+        # compute alpha_* given E[Z]
+        alpha_G = jnp.sum(E_Z, axis=(0,1,2))
+        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4,5))
+        alpha_Phi = jnp.sum(E_Z, axis=(0,2,3,5))
+        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3,4)).T
+        return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
 
-    def _m_step_g(self, E_G):
+    def _m_step_g(self, alpha_G):
         """Maximize conditional distribution of core tensor.
 
-        E_G: (K_M, K_N, K_P)
+        alpha_G: (K_M, K_N, K_P)
         """
-        alpha_post = self.alpha + E_G
+        alpha_post = self.alpha + alpha_G
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_psi(self, E_Psi):
+    def _m_step_psi(self, alpha_Psi):
         """Maximize conditional distribution of Psi factor.
         
-        E_Psi: (M, K_M)
+        alpha_Psi: (M, K_M)
         """
-        alpha_post = self.alpha + E_Psi
+        alpha_post = self.alpha + alpha_Psi
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_phi(self, E_Phi):
+    def _m_step_phi(self, alpha_Phi):
         """Maximize conditional distribution of Phi factor.
         
-        E_Phi: (N, K_N)
+        alpha_Phi: (N, K_N)
         """
-        alpha_post = self.alpha + E_Phi
+        alpha_post = self.alpha + alpha_Phi
         return tfd.Dirichlet(alpha_post).mode()
 
-    def _m_step_theta(self, E_Theta):
+    def _m_step_theta(self, alpha_Theta):
         """Maximize conditional distribution of Phi factor.
         
-        E_Theta: (K_P, P)
+        alpha_Theta: (K_P, P)
         """
-        alpha_post = self.alpha + E_Theta
+        alpha_post = self.alpha + alpha_Theta
         return tfd.Dirichlet(alpha_post).mode()
 
-    def m_step(self, E_G, E_Psi, E_Phi, E_Theta):
-        G = self._m_step_g(E_G)
-        Psi = self._m_step_psi(E_Psi)
-        Phi = self._m_step_phi(E_Phi)
-        Theta = self._m_step_theta(E_Theta)
+    def m_step(self, alpha_G, alpha_Psi, alpha_Phi, alpha_Theta):
+        G = self._m_step_g(alpha_G)
+        Psi = self._m_step_psi(alpha_Psi)
+        Phi = self._m_step_phi(alpha_Phi)
+        Theta = self._m_step_theta(alpha_Theta)
         return G, Psi, Phi, Theta
 
     def heldout_log_likelihood(self, X, mask, params):
