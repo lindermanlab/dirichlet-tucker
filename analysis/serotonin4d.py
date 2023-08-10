@@ -15,7 +15,7 @@ from sklearn.metrics import confusion_matrix
 from tensorflow_probability.substrates import jax as tfp
 from tqdm.auto import trange
 
-from dtd.model3d import DirichletTuckerDecomp
+from dtd.model4d import DirichletTuckerDecomp
 
 tfd = tfp.distributions
 
@@ -26,41 +26,36 @@ def load_data(data_dir):
     # read in behav data
     with open(os.path.join(data_dir, "behav_data.bson"), 'rb') as f:
         data = bson.decode_all(f.read())
-    # Xb = np.reshape(np.frombuffer(data[0]['Xb']['data'], dtype=np.float64), data[0]['Xb']['size'], order='F')
-    Xb = np.reshape(np.frombuffer(data[0]['Xb']['data'], dtype=np.float64), data[0]['Xb']['size'], order='F').astype(np.float32)
-    # Behavior tensor Xb is mice x syllables x positions x epochs
-
-    # Option 1: Marginalize over positions
-    X = Xb.sum(axis=2)
-    X = np.transpose(X, (0, 2, 1))
-
-    # Option 2: Combine syllables and positions
-    # X = np.transpose(Xb, (0, 3, 1, 2))
-    # X = X.reshape(X.shape[0], X.shape[1], -1)
+    
+    X = np.reshape(np.frombuffer(data[0]['Xb']['data'], dtype=np.float64), data[0]['Xb']['size'], order='F').astype(np.float32)
+    
+    # Behavior tensor X is mice x syllables x positions x epochs
+    # Permute to mice x epochs x positions x syllables
+    X = np.transpose(X, (0, 3, 2, 1))
     return X, y
 
 
 def make_mask(X, key=0, train_frac=0.8):
     """## Split the data into train and test"""
-    M, N, P = X.shape
+    M, N, P, S = X.shape
     key = jr.PRNGKey(key)
     mask = tfd.Bernoulli(probs=train_frac).sample(seed=key, sample_shape = (M, N)).astype(bool)
     return mask
 
 
-def fit_model(key, X, mask, K_M, K_N, K_P, alpha=1.1):
-    M, N, P = X.shape
-    S = X[0,0].sum()
+def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters):
+    M, N, P, S = X.shape
+    C = X[0,0].sum()
 
     # Construct a model
-    model = DirichletTuckerDecomp(S, K_M, K_N, K_P, alpha)
+    model = DirichletTuckerDecomp(C, K_M, K_N, K_P, K_S, alpha=alpha)
     # Initialize the parameters randomly
     print("initializing model")
-    init_params = model.sample_params(key, M, N, P)
+    init_params = model.sample_params(key, M, N, P, S)
     print("done")
 
     # Fit the model with EM
-    params, lps = model.fit(X, mask, init_params, 5000)
+    params, lps = model.fit(X, mask, init_params, num_iters)
 
     # scale = M * N * P
     # plt.plot(jnp.array(lps) / scale)
@@ -72,19 +67,20 @@ def fit_model(key, X, mask, K_M, K_N, K_P, alpha=1.1):
     test_ll = model.heldout_log_likelihood(X, mask, params)
 
     # Make a baseline of average syllable usage in each epoch
-    baseline_probs = jnp.mean(X[mask], axis=0)
-    baseline_probs /= baseline_probs.sum(axis=-1, keepdims=True)
-    baseline_test_ll = tfd.Multinomial(S, probs=baseline_probs).log_prob(X[~mask]).sum()
+    X_flat = X.reshape(M, N, P * S)
+    baseline_probs = jnp.mean(X_flat[mask], axis=0) + alpha
+    baseline_probs /= baseline_probs.sum()
+    baseline_test_ll = tfd.Multinomial(C, probs=baseline_probs).log_prob(X_flat[~mask]).sum()
 
     # Compute the test log likelihood under the saturated model
-    probs_sat = X / X.sum(axis=-1, keepdims=True)
-    test_ll_sat = tfd.Multinomial(S, probs=probs_sat).log_prob(X)[~mask].sum()
+    probs_sat = X_flat[~mask] / X_flat[~mask].sum(axis=-1, keepdims=True)
+    test_ll_sat = tfd.Multinomial(C, probs=probs_sat).log_prob(X_flat[~mask]).sum()
 
     pct_dev = (test_ll - baseline_test_ll) / (test_ll_sat - baseline_test_ll)
     print("done")
 
     params_dict = dict(
-        [(k, v) for k, v in zip(["G", "Psi", "Phi", "Theta"], params)]
+        [(k, v) for k, v in zip(["G", "Psi", "Phi", "Theta", "Lambda"], params)]
     )
 
     return model, params_dict, lps, pct_dev
@@ -106,11 +102,18 @@ def plot_results(X, y, model, params):
     plt.colorbar(im)
 
     """### Look at the factors"""
-    G, Psi, Phi, Theta = params
+    G, Psi, Phi, Theta, Lambda = params
+
+    # Plot the position topics
+    plt.figure()
+    plt.imshow(Theta, aspect="auto", interpolation="none")
+    plt.xlabel("position")
+    plt.ylabel("topics")
+    plt.colorbar()
 
     # Plot the syllable topics
     plt.figure()
-    plt.imshow(Theta, aspect="auto", interpolation="none")
+    plt.imshow(Lambda, aspect="auto", interpolation="none")
     plt.xlabel("syllables")
     plt.ylabel("topics")
     plt.colorbar()
@@ -227,42 +230,47 @@ def evaluate_prediction(Psi, y):
 #     jnp.unravel_index(jnp.argmax(all_test_lls_tens[0]), (len(K_Ns), len(K_Ps)))
 
 @click.command()
+@click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')
 @click.option('--seed', default=0, help='random seed for initialization.')
 @click.option('--km', default=2, help='number of factors along dimension 1.')
 @click.option('--kn', default=2, help='number of factors along dimension 2.')
 @click.option('--kp', default=2, help='number of factors along dimension 3.')
+@click.option('--ks', default=2, help='number of factors along dimension 4.')
 @click.option('--alpha', default=1.1, help='concentration of Dirichlet prior.')
-def run_one(seed, km, kn, kp, alpha, ):
+@click.option('--num_iters', default=5000, help='number of iterations of EM.')
+def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
 
     # start a new wandb run to track this script
     wandb.init(
         # set the wandb project where this run will be logged
-        project="serotonin-tucker-decomp",
+        project="serotonin-tucker-decomp-4d",
 
         # track hyperparameters and run metadata
         config={
             "K_M": km,
             "K_N": kn,
             "K_P": kp,
+            "K_S": ks,
             "alpha": alpha,
+            "num_iters": num_iters,
             "seed": seed,
             }
     )
-
+    
     key = jr.PRNGKey(seed)
 
     # Split the data deterministically
-    X, y = load_data()
-    X_train, X_test = make_mask(X, key=0)
+    X, y = load_data(data_dir)
+    mask = make_mask(X, key=0)
 
     # Fit the model using the random seed provided
-    model, params, lps, pct_dev = fit_model(key, X_train, X_test, km, kn, kp, alpha)
+    model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha, num_iters)
     acc, confusion_matrix = evaluate_prediction(params["Psi"], y)
     wandb.run.summary["pct_dev"] = pct_dev
     wandb.run.summary["acc"] = acc
 
     # Plot some results
-    # plot_results(X_train, y, model, params, confusion_matrix)
+    plot_results(X, y, model, params, confusion_matrix)
 
     # Finish the session
     wandb.finish()
@@ -277,19 +285,23 @@ def run_one(seed, km, kn, kp, alpha, ):
 @click.option('--kn_max', default=10, help='number of factors along dimension 2.')
 @click.option('--kp_min', default=2, help='number of factors along dimension 3.')
 @click.option('--kp_max', default=20, help='number of factors along dimension 3.')
+@click.option('--ks_min', default=2, help='number of factors along dimension 4.')
+@click.option('--ks_max', default=20, help='number of factors along dimension 4.')
 @click.option('--k_step', default=1, help='step size for factor grid search.')
 @click.option('--num_restarts', default=1, help='number of random initializations.')
 @click.option('--alpha', default=1.1, help='concentration of Dirichlet prior.')
-def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, k_step, num_restarts, alpha):
+def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks_min, ks_max, k_step, num_restarts, alpha):
 
     # Split the data deterministically
     X, y = load_data(data_dir)
     mask = make_mask(X, key=0)
 
-    for km, kn, kp in it.product(jnp.arange(km_min, km_max+1, step=k_step),
-                                 jnp.arange(kn_min, kn_max+1, step=k_step),
-                                 jnp.arange(kp_min, kp_max+1, step=k_step)):
-        print("fitting model with km={}, kn={}, kp={}".format(km, kn, kp))
+    for km, kn, kp, ks in it.product(jnp.arange(km_min, km_max+1, step=k_step),
+                                     jnp.arange(kn_min, kn_max+1, step=k_step),
+                                     jnp.arange(kp_min, kp_max+1, step=k_step),
+                                     jnp.arange(ks_min, ks_max+1, step=k_step),
+                                     ):
+        print("fitting model with km={}, kn={}, kp={} ks={}".format(km, kn, kp, ks))
 
         # start a new wandb run to track this script
         print("initializing wandb")
@@ -302,6 +314,7 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, k_
                 "K_M": km,
                 "K_N": kn,
                 "K_P": kp,
+                "K_S": ks,
                 "alpha": alpha,
                 "num_restarts": num_restarts,
                 "seed": seed,
@@ -314,7 +327,7 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, k_
         accs = []
         for i in range(num_restarts):
             key = jr.PRNGKey(seed)
-            model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, alpha)
+            model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha)
             acc, confusion_matrix = evaluate_prediction(params["Psi"], y)
 
             pct_devs.append(pct_dev)
@@ -330,4 +343,5 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, k_
 
 
 if __name__ == '__main__':
-    run_sweep()
+    # run_sweep()
+    run_one()
