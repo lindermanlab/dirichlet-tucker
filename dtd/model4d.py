@@ -4,7 +4,6 @@ import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 from jax import jit
 from tqdm.auto import trange
-from fastprogress.fastprogress import master_bar, progress_bar
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
@@ -42,16 +41,22 @@ class DirichletTuckerDecomp:
                 Theta: (K_P, P) topic (note transposed!)
                 Lambda: (K_S, S) topic (note transposed!)
         """
-        # TODO: This function is stupidly slow!
         K_M, K_N, K_P, K_S = self.K_M, self.K_N, self.K_P, self.K_S
-
-        # Sample parameters from the prior
         k1, k2, k3, k4, k5 = jr.split(key, 5)
-        G = tfd.Dirichlet(self.alpha * jnp.ones(K_P * K_S)).sample(seed=k1, sample_shape=(K_M, K_N,)).reshape((K_M, K_N, K_P, K_S))
-        Psi = tfd.Dirichlet(self.alpha * jnp.ones(K_M)).sample(seed=k2, sample_shape=(M,))
-        Phi = tfd.Dirichlet(self.alpha * jnp.ones(K_N)).sample(seed=k3, sample_shape=(N,))
-        Theta = tfd.Dirichlet(self.alpha * jnp.ones(P)).sample(seed=k4, sample_shape=(K_P,))
-        Lambda = tfd.Dirichlet(self.alpha * jnp.ones(S)).sample(seed=k5, sample_shape=(K_S,))
+        
+        # Using TFP: This is stupidly slow for some reason!
+        # G = tfd.Dirichlet(self.alpha * jnp.ones(K_P * K_S)).sample(seed=k1, sample_shape=(K_M, K_N,)).reshape((K_M, K_N, K_P, K_S))
+        # Psi = tfd.Dirichlet(self.alpha * jnp.ones(K_M)).sample(seed=k2, sample_shape=(M,))
+        # Phi = tfd.Dirichlet(self.alpha * jnp.ones(K_N)).sample(seed=k3, sample_shape=(N,))
+        # Theta = tfd.Dirichlet(self.alpha * jnp.ones(P)).sample(seed=k4, sample_shape=(K_P,))
+        # Lambda = tfd.Dirichlet(self.alpha * jnp.ones(S)).sample(seed=k5, sample_shape=(K_S,))
+
+        # Using jax.random
+        G = jr.dirichlet(k1, self.alpha * jnp.ones(K_P * K_S), shape=(K_M, K_N,)).reshape((K_M, K_N, K_P, K_S))
+        Psi = jr.dirichlet(k2, self.alpha * jnp.ones(K_M), shape=(M,))
+        Phi = jr.dirichlet(k3, self.alpha * jnp.ones(K_N), shape=(N,))
+        Theta = jr.dirichlet(k4, self.alpha * jnp.ones(P), shape=(K_P,))
+        Lambda = jr.dirichlet(k5, self.alpha * jnp.ones(S), shape=(K_S,))
         return (G, Psi, Phi, Theta, Lambda)
 
     def sample_data(self, key, params):
@@ -141,10 +146,14 @@ class DirichletTuckerDecomp:
         return G, Psi, Phi, Theta, Lambda
 
     def heldout_log_likelihood(self, X, mask, params):
-        # TODO: Compute the log likelihood of the held-out entries in X
-        M, N, P, S = X.shape
+        r"""Compute the log likelihood of the held-out entries in X
+        
+        NOTE: Ignores the multinomial normalizing constant (C \choose x_1; x_2, ... x_N)
+        """
         probs = jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
-        return jnp.where(~mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
+        return jnp.sum(X[~mask] * jnp.log(probs[~mask]))
+        # M, N, P, S = X.shape
+        # return jnp.where(~mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
         # return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs.reshape(M, N, P*S))\
         #                  .log_prob(X.reshape(M, N, P*S)), 0.0).sum()
 
@@ -163,11 +172,12 @@ class DirichletTuckerDecomp:
         # log likelihood of observed data
         probs = jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
         # lp += jnp.where(mask, tfd.Multinomial(self.C, probs=probs).log_prob(X), 0.0).sum()
-        lp += jnp.where(mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
+        # lp += jnp.where(mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
+        lp += jnp.sum(X[mask] * jnp.log(probs[mask]))
         return lp
 
     def reconstruct(self, params):
-        return self.C * jnp.einsum('ijkl, mi, nj, kp, ls->mnps', *params)
+        return self.C * jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
 
     # Fit the model!
     def fit(self, X, mask, init_params, num_iters):
@@ -183,10 +193,10 @@ class DirichletTuckerDecomp:
         params = init_params
         lps = []
         scale = X[mask].sum()
-        for itr in master_bar(range(num_iters)):
+        for itr in trange(num_iters):
             lp, params = em_step(X, mask, params)
             lps.append(lp)
             if itr % 100 == 0:
-                print("itr {:04d}: lp: {:.4f}".format(itr, lps[-1] / scale))
+                print("itr {:04d}: lp: {:.5f}".format(itr, lps[-1] / scale))
 
         return params, jnp.stack(lps)

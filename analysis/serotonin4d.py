@@ -31,6 +31,10 @@ def load_data(data_dir):
     # Behavior tensor X is mice x syllables x positions x epochs
     # Permute to mice x epochs x positions x syllables
     X = np.transpose(X, (0, 3, 2, 1))
+    
+    # Permute the syllables
+    perm = np.array([2, 45, 32, 33, 20, 23, 31, 47, 6, 25, 10, 17, 42, 12, 30, 36, 28, 34, 49, 13, 44, 7, 16, 15, 29, 48, 37, 38, 8, 24, 39, 43, 1, 26, 11, 19, 9, 40, 27, 21, 3, 18, 35, 4, 14, 5, 41, 22, 46, 50]) - 1
+    X = X[..., perm]
     return X, y
 
 
@@ -56,48 +60,39 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters):
     # Fit the model with EM
     params, lps = model.fit(X, mask, init_params, num_iters)
 
-    # scale = M * N * P
-    # plt.plot(jnp.array(lps) / scale)
-    # plt.xlabel("iteration")
-    # plt.ylabel("log joint prob (per entry)")
-
     # Compute test LL
     print("computing pct_dev")
     test_ll = model.heldout_log_likelihood(X, mask, params)
 
     # Make a baseline of average syllable usage in each epoch
-    X_flat = X.reshape(M, N, P * S)
-    baseline_probs = jnp.mean(X_flat[mask], axis=0) + alpha
+    # NOTE: ignores the multinomial normalizing constant, like `heldout_log_likelihood`
+    baseline_probs = jnp.mean(X[mask], axis=0) + alpha
     baseline_probs /= baseline_probs.sum()
-    baseline_test_ll = tfd.Multinomial(C, probs=baseline_probs).log_prob(X_flat[~mask]).sum()
+    baseline_test_ll = jnp.sum(X[~mask] * jnp.log(baseline_probs))
 
     # Compute the test log likelihood under the saturated model
-    probs_sat = X_flat[~mask] / X_flat[~mask].sum(axis=-1, keepdims=True)
-    test_ll_sat = tfd.Multinomial(C, probs=probs_sat).log_prob(X_flat[~mask]).sum()
+    sat_probs = X[~mask] / X[~mask].sum(axis=(-1, -2), keepdims=True)
+    sat_test_ll = jnp.sum(X[~mask] * jnp.log(sat_probs))
 
-    pct_dev = (test_ll - baseline_test_ll) / (test_ll_sat - baseline_test_ll)
+    pct_dev = (test_ll - baseline_test_ll) / (sat_test_ll - baseline_test_ll)
     print("done")
 
-    params_dict = dict(
-        [(k, v) for k, v in zip(["G", "Psi", "Phi", "Theta", "Lambda"], params)]
-    )
-
-    return model, params_dict, lps, pct_dev
+    return model, params, lps, pct_dev
 
 
 def plot_results(X, y, model, params):
     # Compute the reconstruction
-    S_train = X.sum(axis=-1)
-    X_hat = model.reconstruct(params, S_train)
+    X_hat = model.reconstruct(params)
 
     # Plot the true and reconstructed data for mouse `m`
     m = 0
+    n = 0
     fig, axs = plt.subplots(3, 1)
-    im = axs[0].imshow(X[m], aspect="auto", interpolation="none")
+    im = axs[0].imshow(X[m, n], aspect="auto", interpolation="none")
     plt.colorbar(im)
-    im = axs[1].imshow(X_hat[m], aspect="auto", interpolation="none")
+    im = axs[1].imshow(X_hat[m, n], aspect="auto", interpolation="none")
     plt.colorbar(im)
-    im = axs[2].imshow(X[m] - X_hat[m], aspect="auto", interpolation="none")
+    im = axs[2].imshow(X[m, n] - X_hat[m, n], aspect="auto", interpolation="none")
     plt.colorbar(im)
 
     """### Look at the factors"""
@@ -111,8 +106,13 @@ def plot_results(X, y, model, params):
     plt.colorbar()
 
     # Plot the syllable topics
+    syll_groups = np.array([2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 7, 7, 7, 7, 7, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1, 6, 6, 6, 6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]) -1
+    group_bounds = np.cumsum(np.bincount(syll_groups)[:-1])
+
     plt.figure()
     plt.imshow(Lambda, aspect="auto", interpolation="none")
+    for bound in group_bounds:
+        plt.axvline(bound-.5, color='r')
     plt.xlabel("syllables")
     plt.ylabel("topics")
     plt.colorbar()
@@ -121,7 +121,7 @@ def plot_results(X, y, model, params):
     plt.figure()
     plt.imshow(Phi.T, aspect="auto", interpolation="none")
     plt.xlabel("epochs")
-    plt.ylabel("factors")
+    plt.ylabel("loadings")
     plt.colorbar()
 
     # Plot the mouse loadings
@@ -131,7 +131,7 @@ def plot_results(X, y, model, params):
     plt.imshow(Psi[perm], aspect="auto", interpolation="none")
     for bound in bounds:
         plt.axhline(bound, color='r')
-    plt.xlabel("factors")
+    plt.xlabel("loadings")
     plt.ylabel("mice")
     plt.colorbar()
 
@@ -157,35 +157,7 @@ def evaluate_prediction(Psi, y):
 
     return acc, confusion_mat
 
-
-@click.command()
-@click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')
-@click.option('--seed', default=0, help='random seed for initialization.')
-@click.option('--km', default=2, help='number of factors along dimension 1.')
-@click.option('--kn', default=2, help='number of factors along dimension 2.')
-@click.option('--kp', default=2, help='number of factors along dimension 3.')
-@click.option('--ks', default=2, help='number of factors along dimension 4.')
-@click.option('--alpha', default=1.1, help='concentration of Dirichlet prior.')
-@click.option('--num_iters', default=5000, help='number of iterations of EM.')
 def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
-
-    # start a new wandb run to track this script
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="serotonin-tucker-decomp-4d",
-
-        # track hyperparameters and run metadata
-        config={
-            "K_M": km,
-            "K_N": kn,
-            "K_P": kp,
-            "K_S": ks,
-            "alpha": alpha,
-            "num_iters": num_iters,
-            "seed": seed,
-            }
-    )
-    
     key = jr.PRNGKey(seed)
 
     # Split the data deterministically
@@ -194,15 +166,16 @@ def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
 
     # Fit the model using the random seed provided
     model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha, num_iters)
-    acc, confusion_matrix = evaluate_prediction(params["Psi"], y)
-    wandb.run.summary["pct_dev"] = pct_dev
-    wandb.run.summary["acc"] = acc
+    
+    G, Psi, Phi, Theta, Lambda = params
+    acc, confusion_matrix = evaluate_prediction(Psi, y)
 
     # Plot some results
-    plot_results(X, y, model, params, confusion_matrix)
+    plot_results(X, y, model, params)
 
     # Finish the session
-    wandb.finish()
+    print("pct_dev:", pct_dev)
+    print("acc:", acc)
 
 
 @click.command()
@@ -272,5 +245,4 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks
 
 
 if __name__ == '__main__':
-    # run_sweep()
-    run_one()
+    run_sweep()
