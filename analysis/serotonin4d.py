@@ -46,7 +46,7 @@ def make_mask(X, key=0, train_frac=0.8):
     return mask
 
 
-def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters):
+def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters, tol):
     M, N, P, S = X.shape
     C = X[0,0].sum()
 
@@ -58,7 +58,7 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters):
     print("done")
 
     # Fit the model with EM
-    params, lps = model.fit(X, mask, init_params, num_iters)
+    params, lps = model.fit(X, mask, init_params, num_iters, tol)
 
     # Compute test LL
     print("computing pct_dev")
@@ -72,11 +72,10 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters):
 
     # Compute the test log likelihood under the saturated model
     sat_probs = X[~mask] / X[~mask].sum(axis=(-1, -2), keepdims=True)
-    sat_test_ll = jnp.sum(X[~mask] * jnp.log(sat_probs))
+    sat_test_ll = jnp.nansum(X[~mask] * jnp.log(sat_probs))
 
     pct_dev = (test_ll - baseline_test_ll) / (sat_test_ll - baseline_test_ll)
     print("done")
-
     return model, params, lps, pct_dev
 
 
@@ -192,7 +191,9 @@ def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
 @click.option('--k_step', default=1, help='step size for factor grid search.')
 @click.option('--num_restarts', default=1, help='number of random initializations.')
 @click.option('--alpha', default=1.1, help='concentration of Dirichlet prior.')
-def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks_min, ks_max, k_step, num_restarts, alpha):
+@click.option('--num_iters', default=2000, help='max number of iterations of EM')
+@click.option('--tol', default=1e-4, help='tolerance for EM convergence')
+def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks_min, ks_max, k_step, num_restarts, alpha, num_iters, tol):
 
     # Split the data deterministically
     X, y = load_data(data_dir)
@@ -209,7 +210,7 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks
         print("initializing wandb")
         wandb.init(
             # set the wandb project where this run will be logged
-            project="serotonin-tucker-decomp-masked",
+            project="serotonin-tucker-decomp-4d",
 
             # track hyperparameters and run metadata
             config={
@@ -220,6 +221,8 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks
                 "alpha": alpha,
                 "num_restarts": num_restarts,
                 "seed": seed,
+                "num_iters": num_iters,
+                "tol" : tol
                 }
         )
         print("done")
@@ -229,12 +232,21 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks
         accs = []
         for i in range(num_restarts):
             key = jr.PRNGKey(seed)
-            model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha)
-            acc, confusion_matrix = evaluate_prediction(params["Psi"], y)
+            model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha, num_iters, tol)
 
+            # Compute drug prediction accuracy
+            G, Psi, Phi, Theta, Lambda = params
+            acc, _ = evaluate_prediction(Psi, y)
+            
+            # Keep track of perf measures
             pct_devs.append(pct_dev)
             accs.append(acc)
             seed += 1
+
+            # Cleanup
+            del model
+            del params
+            del lps
 
         # Finish the session
         wandb.run.summary["pct_dev_mean"] = jnp.array(pct_devs).mean()
