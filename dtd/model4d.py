@@ -150,13 +150,10 @@ class DirichletTuckerDecomp:
         
         NOTE: Ignores the multinomial normalizing constant (C \choose x_1; x_2, ... x_N)
         """
+        # Use `jnp.where` to avoid NonConcreteBooleanIndexError 
         probs = jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
-        return jnp.sum(X[~mask] * jnp.log(probs[~mask]))
-        # M, N, P, S = X.shape
-        # return jnp.where(~mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
-        # return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs.reshape(M, N, P*S))\
-        #                  .log_prob(X.reshape(M, N, P*S)), 0.0).sum()
-
+        return jnp.where(~mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
+        
     def log_prob(self, X, mask, params):
         M, N, P, S = X.shape
         G, Psi, Phi, Theta, Lambda = params
@@ -170,10 +167,9 @@ class DirichletTuckerDecomp:
         lp += tfd.Dirichlet(self.alpha * jnp.ones(S)).log_prob(Lambda).sum()
 
         # log likelihood of observed data
+        # Use `jnp.where` to avoid NonConcreteBooleanIndexError 
         probs = jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
-        # lp += jnp.where(mask, tfd.Multinomial(self.C, probs=probs).log_prob(X), 0.0).sum()
-        # lp += jnp.where(mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
-        lp += jnp.sum(X[mask] * jnp.log(probs[mask]))
+        lp += jnp.where(mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
         return lp
 
     def reconstruct(self, params):
