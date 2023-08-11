@@ -176,7 +176,7 @@ class DirichletTuckerDecomp:
         return self.C * jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
 
     # Fit the model!
-    def fit(self, X, mask, init_params, num_iters):
+    def fit(self, X, mask, init_params, num_iters, tol=1e-4):
 
         @jit
         def em_step(X, mask, params):
@@ -192,7 +192,12 @@ class DirichletTuckerDecomp:
         for itr in trange(num_iters):
             lp, params = em_step(X, mask, params)
             lps.append(lp)
+
             if itr % 100 == 0:
                 print("itr {:04d}: lp: {:.5f}".format(itr, lps[-1] / scale))
+
+            if itr > 1 and abs(lps[-1] - lps[-2]) / scale < tol:
+                print("converged at tolerance level", tol) 
+                break
 
         return params, jnp.stack(lps)
