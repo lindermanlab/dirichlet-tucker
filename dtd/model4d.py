@@ -4,6 +4,7 @@ import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 from jax import jit
 from tqdm.auto import trange
+from fastprogress.fastprogress import master_bar, progress_bar
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
@@ -181,8 +182,11 @@ class DirichletTuckerDecomp:
         # Initialize the recursion
         params = init_params
         lps = []
-        for itr in trange(num_iters):
+        scale = X[mask].sum()
+        for itr in master_bar(range(num_iters)):
             lp, params = em_step(X, mask, params)
             lps.append(lp)
+            if itr % 100 == 0:
+                print("itr {:04d}: lp: {:.4f}".format(itr, lps[-1] / scale))
 
         return params, jnp.stack(lps)
