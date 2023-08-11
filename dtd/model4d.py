@@ -196,7 +196,10 @@ class DirichletTuckerDecomp:
             if itr % 100 == 0:
                 print("itr {:04d}: lp: {:.5f}".format(itr, lps[-1] / scale))
 
-            if itr > 1 and abs(lps[-1] - lps[-2]) / scale < tol:
+            # Check for convergence of scaled LP
+            # NOTE: Sometimes individual EM steps change LP very little,
+            #       so we look at change in scaled LP over 100 steps instead.
+            if itr > 100 and abs(lps[-1] - lps[-100]) / scale < tol:
                 print("converged at tolerance level", tol) 
                 break
 
