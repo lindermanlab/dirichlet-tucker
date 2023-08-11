@@ -13,7 +13,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV, cross_val_predict
 from sklearn.metrics import confusion_matrix
 from tensorflow_probability.substrates import jax as tfp
-from tqdm.auto import trange
 
 from dtd.model4d import DirichletTuckerDecomp
 
@@ -140,31 +139,6 @@ def plot_results(X, y, model, params):
 def evaluate_prediction(Psi, y):
     """### Classify drug labels"""
 
-    # train_mask = jnp.ones(M, dtype=bool)
-    # test_inds = jr.choice(jr.PRNGKey(1), jnp.arange(M,), shape=(M // 5,), replace=False)
-    # train_mask = train_mask.at[test_inds].set(False)
-
-    # lr = LogisticRegressionCV(verbose=False)
-    # lr.fit(Psi[train_mask], drugs[train_mask] - 1)
-    # print(lr.score(Psi[~train_mask], drugs[~train_mask] - 1))
-    # pred_probs = lr.predict_proba(Psi[~train_mask])
-    # print(pred_probs[jnp.arange(len(pred_probs)), drugs[~train_mask] - 1].mean())
-
-
-    # ##
-    # train_mask = jnp.ones(M, dtype=bool)
-    # test_inds = jr.choice(jr.PRNGKey(0), jnp.arange(M,), shape=(M // 5,), replace=False)
-    # train_mask = train_mask.at[test_inds].set(False)
-
-    # Y = X.sum(axis=1)
-    # Y /= Y.sum(axis=1, keepdims=True)
-
-    # lr = LogisticRegressionCV(verbose=False)
-    # lr.fit(Y[train_mask], drugs[train_mask] - 1)
-    # print(lr.score(Y[~train_mask], drugs[~train_mask] - 1))
-    # pred_probs = lr.predict_proba(Y[~train_mask])
-    # print(pred_probs[jnp.arange(len(pred_probs)), drugs[~train_mask] - 1].mean())
-
     # normalize weights and factors
     def normalize_weights(features):
         features -= features.mean(axis=0)
@@ -183,51 +157,6 @@ def evaluate_prediction(Psi, y):
 
     return acc, confusion_mat
 
-
-# def model_selection():
-#     """## Cross-validate the number of factors"""
-
-#     import itertools as it
-
-#     K_Ms = np.arange(2, 21)
-#     K_Ns = np.arange(2, 11)
-#     K_Ps = np.arange(2, 16)
-
-#     all_test_lls = dict()
-#     all_params = dict()
-#     all_lps = dict()
-
-#     for K_M, K_N, K_P in it.product(K_Ms, K_Ns, K_Ps):
-#         print("fitting model with K_M={}, K_N={}, K_P={}".format(K_M, K_N, K_P))
-#         key = (K_M, K_N, K_P)
-#         if key in all_test_lls:
-#             continue
-
-#         model = DirichletTuckerDecomp(K_M, K_N, K_P, alpha)
-#         init_params = model.sample_params(jr.PRNGKey(1), M, N, P)
-#         params, lps = model.fit(X_train, init_params, 3000)
-
-#         all_test_lls[key] = model.log_likelihood(X_test, params)
-#         all_params[key] = params
-#         all_lps[key] = lps
-
-#     all_test_lls_tens = np.nan * np.ones((len(K_Ms), len(K_Ns), len(K_Ps)))
-#     for i, K_M in enumerate(K_Ms):
-#         for j, K_N in enumerate(K_Ns):
-#             for k, K_P in enumerate(K_Ps):
-#                 key = (K_M, K_N, K_P)
-#                 if key in all_test_lls:
-#                     all_test_lls_tens[i, j, k] = all_test_lls[key]
-
-#     scale = M * N * P
-#     plt.imshow(all_test_lls_tens[0] / scale, extent=(K_Ps[0], K_Ps[-1], K_Ns[-1], K_Ns[0]))
-#     plt.xlabel(r"$K_P$")
-#     plt.ylabel(r"$K_N$")
-#     plt.title(r"test lls for $K_M=${}".format(K_Ms[0]))
-#     plt.colorbar()
-
-#     # Find the max test
-#     jnp.unravel_index(jnp.argmax(all_test_lls_tens[0]), (len(K_Ns), len(K_Ps)))
 
 @click.command()
 @click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')

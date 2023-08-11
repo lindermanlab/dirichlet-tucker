@@ -143,8 +143,9 @@ class DirichletTuckerDecomp:
         # TODO: Compute the log likelihood of the held-out entries in X
         M, N, P, S = X.shape
         probs = jnp.einsum('ijkl,mi,nj,kp,ls->mnps', *params)
-        return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs.reshape(M, N, P*S))\
-                         .log_prob(X.reshape(M, N, P*S)), 0.0).sum()
+        return jnp.where(~mask, jnp.sum(X * jnp.log(probs), axis=(2,3)), 0.0).sum()
+        # return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs.reshape(M, N, P*S))\
+        #                  .log_prob(X.reshape(M, N, P*S)), 0.0).sum()
 
     def log_prob(self, X, mask, params):
         M, N, P, S = X.shape
