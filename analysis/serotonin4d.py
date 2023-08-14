@@ -199,11 +199,24 @@ def run_sweep(data_dir, seed, km_min, km_max, kn_min, kn_max, kp_min, kp_max, ks
     X, y = load_data(data_dir)
     mask = make_mask(X, key=0)
 
-    for km, kn, kp, ks in it.product(jnp.arange(km_min, km_max+1, step=k_step),
-                                     jnp.arange(kn_min, kn_max+1, step=k_step),
-                                     jnp.arange(kp_min, kp_max+1, step=k_step),
-                                     jnp.arange(ks_min, ks_max+1, step=k_step),
+    # Get the set of existing runs
+    print("getting list of existing runs")
+    api = wandb.Api(timeout=60)
+    runs = api.runs("linderman-lab/serotonin-tucker-decomp-4d")
+    configs = []
+    for run in runs:
+        configs.append((run.config['K_M'], run.config['K_N'], run.config['K_P'], run.config['K_S']))
+    print("done")
+
+    for km, kn, kp, ks in it.product(range(km_min, km_max+1, k_step),
+                                     range(kn_min, kn_max+1, k_step),
+                                     range(kp_min, kp_max+1, k_step),
+                                     range(ks_min, ks_max+1, k_step),
                                      ):
+        if (km, kn, kp, ks) in configs:
+            print("found existing run with km={}, kn={}, kp={} ks={}. continuing.".format(km, kn, kp, ks))
+            continue
+
         print("fitting model with km={}, kn={}, kp={} ks={}".format(km, kn, kp, ks))
 
         # start a new wandb run to track this script
