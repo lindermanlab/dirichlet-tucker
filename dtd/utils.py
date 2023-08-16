@@ -25,7 +25,8 @@ class ShuffleIndicesIterator():
         self._indices = jnp.indices(batch_shape).reshape(len(batch_shape), -1).T
 
         self.minibatch_size = minibatch_size
-        self.n_batches = len(self._indices) // self.minibatch_size
+        self.n_complete = len(self._indices) // self.minibatch_size
+        self.has_incomplete = (len(self._indices) % self.minibatch_size) > 0
 
     def __iter__(self):
         return self
@@ -37,7 +38,8 @@ class ShuffleIndicesIterator():
 
         # Split indices into complete minibatch sets and an incomplete set
         batched_indices, remaining_indices \
-                            = jnp.split(indices, (self.n_batches*self.minibatch_size,))
-        batched_indices = batched_indices.reshape(self.n_batches, self.minibatch_size, -1)
+            = jnp.split(indices, (self.n_complete*self.minibatch_size,))
+        batched_indices \
+            = batched_indices.reshape(self.n_complete, self.minibatch_size, -1)
 
         return batched_indices, remaining_indices
