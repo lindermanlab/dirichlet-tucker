@@ -2,10 +2,10 @@ import pytest
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
+import optax
 
 import dtd.model3d
 import dtd.model4d
-from dtd.utils import ShuffleIndicesIterator
 
 def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into a train (1) and validation (0) sets."""
@@ -152,3 +152,53 @@ def test_get_minibatch_3d(shape=(20, 10, 25),
     
     _, outs = lax.scan(fn, None, batched_indices)
     assert len(outs) == len(batched_indices)
+
+def test_stochastic_fit_3d(shape=(20, 10, 25), 
+                rank=(5, 4, 3), 
+                batch_ndims=2,
+                total_counts=1000,
+                n_epochs=5,
+                minibatch_size=20,
+                key=0
+                ):
+    """Evaluate full-batch EM fit."""
+    key = jr.PRNGKey(key)
+    key_true, key_data, key_mask, key_init, key_fit = jr.split(key, 5)
+
+    # Instantiate the model
+    model = dtd.model3d.DirichletTuckerDecomp(total_counts, *rank)
+
+    # Generate observations from an underlying DTD model
+    true_params = model.sample_params(key_true, *shape)
+    X = model.sample_data(key_data, true_params)
+    mask_shape = shape[:batch_ndims] 
+    mask = make_random_mask(key_mask, mask_shape)
+
+    # Initialize a different set of parameters
+    init_params = model.sample_params(key_init, *shape)
+
+    # Define a learning rate schedule function
+    lr_schedule_fn = (lambda n_minibatches, n_epochs:
+        optax.cosine_decay_schedule(
+            init_value=1.,
+            alpha=0.,
+            decay_steps=n_minibatches*n_epochs,
+            exponent=0.8,
+        )
+    )
+
+    # Fit!
+    fitted_params, lps \
+        = model.stochastic_fit(X, mask, init_params, n_epochs,
+                               lr_schedule_fn, minibatch_size, key_fit)
+
+    # Check that log probabilities are monotonically increasing
+    assert lps[-1,-1] - lps[0,0] > 0, \
+        "Expected final lp to be more positive than initial lp, but got " \
+        + f"lps[0,0]={lps[0,0]:.2f} and lps[-1,-1]={lps[-1,-1]:.2f}"
+    
+    avg_mono_incr = (jnp.diff(lps.ravel()) > 0).mean()
+    assert avg_mono_incr >= 0.5, \
+        "Expected lps to be monotically increasing at least 50% of the time, " \
+        + f"but got {avg_mono_incr*100:0.0f}%. NB: This may be a sensitive metric."
+

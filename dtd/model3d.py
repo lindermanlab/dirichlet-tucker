@@ -3,6 +3,8 @@ import jax.numpy as jnp
 import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 from jax import jit, lax
+from jax.tree_util import tree_map
+import optax
 from tqdm.auto import trange
 import itertools
 
@@ -27,6 +29,9 @@ class DirichletTuckerDecomp:
         self.K_N = K_N
         self.K_P = K_P
         self.alpha = alpha
+
+        self.batch_ndims = 2
+        self.event_ndims = 1
 
     def sample_params(self, key, M, N, P):
         """Sample a data tensor and parameters from the model.
@@ -312,3 +317,147 @@ class DirichletTuckerDecomp:
                 (G, this_Psi, this_Phi, Theta),
                 (alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta))
     
+    def minibatched_e_step(self, X, mask, params):
+        """Compute posterior expected sufficient statistics of parameters from a minibatch of data.
+        
+        We are given a minibatch of data, e.g. X has shape (B,P). Contrast this
+        with the data input of the full-batch `e_step`, where X has shape (M,N,P).
+        Additionally, only the parameters relevant to the minibatch are provided.
+
+        Parameters
+            X: (B, P) count tensor
+            mask: (B,) binary matrix specifying held-out samples.
+            params: tuple of arrays
+                G: shape (K_M, K_N, K_P)
+                Psi: shape (B, K_M)
+                Phi: shape (B, K_N)
+                Theta: shape (K_P, P)
+        
+        Returns
+            alpha_G: shape (K_M, K_N, K_P)
+            alpha_Psi: shape (B, K_M)
+            alpha_Phi: shape (B, K_N)
+            alpha_Theta: shape (K_P, P)
+        """
+
+        # Note the different einsum notation when working with minibatched data.
+        # This is equivalent to calculating the full tensor associated with these
+        # parameters, then taking the principle diagonal along the batch dims.
+        probs = jnp.einsum('ijk,bi,bj,kp->bp', *params)
+        relative_probs = jnp.einsum('ijk,bi,bj,kp->ijkbp', *params)
+        relative_probs /= probs
+        E_Z = X * mask[..., None] * relative_probs
+
+        # Note how E_z has collapsed the batch dimensions into a single axis.
+        # This changes the indexing and which axes are being summed over.
+        alpha_G = jnp.sum(E_Z, axis=(3,4))
+        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4)).T
+        alpha_Phi = jnp.sum(E_Z, axis=(0,2,4)).T
+        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3))
+
+        return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
+    
+    def stochastic_fit(self, X, mask, init_params, n_epochs,
+                       lr_schedule_fn, minibatch_size, key):
+        """Fit model parameters to data using stochastic expectation maximization.
+        
+        Parameters
+
+            n_epochs (int):
+                Number of epochs, or passes through the full dataset, to run.
+            lr_schedule_fn (Callable[[n_minibatches, n_epochs], optax.Schedule]):
+                Given (n_minibatches, n_epochs), returns an optax.Schedule
+            minibatch_size (int):
+                Number of data samples to fit on, sampled uniformly from the batch dimensions.
+            key (PRNGKey):
+                PRNGKey to shuffle data loading order at each epoch
+        
+        Returns
+            params
+            lps: (n_epoch, n_total_minibatches_per_epoch)
+            
+        """
+
+        # Instantiate an iterator that produces minibatches of indices into the data
+        batch_shape = X.shape[:self.batch_ndims]
+        indices_iterator = ShuffleIndicesIterator(key, batch_shape, minibatch_size)
+        
+        # Define learning rate schedule and split in complete and incomplete lrs
+        n_minibatches_per_epoch = indices_iterator.n_complete
+        schedule = lr_schedule_fn(n_minibatches_per_epoch, n_epochs)
+        
+        learning_rates = schedule(jnp.arange(n_minibatches_per_epoch*n_epochs))
+        learning_rates = learning_rates.reshape(n_epochs, n_minibatches_per_epoch)
+
+        # Minibatch scaling factor, for each sufficient statistic. See math notes.
+        scaling_factor = (batch_shape[0] * batch_shape[1] / minibatch_size**2,  # M / B_M * N / B_N
+                          batch_shape[1] / minibatch_size,                      # N / B_N
+                          batch_shape[0] / minibatch_size,                      # M / B_M
+                          batch_shape[0] * batch_shape[1] / minibatch_size**2,) # M / B_M * N / B_N
+
+        # Define EM step
+        def em_step(carry, these_inputs):
+            prev_params, prev_rolling_stats = carry
+            these_idxs, lr = these_inputs
+            
+            # Gather minibatched data
+            this_X, this_mask, these_prev_params, these_prev_rolling_stats \
+                    = self._get_minibatch(these_idxs, X, mask, prev_params, prev_rolling_stats)
+
+            # Compute expected sufficient statistics of minibatch
+            these_stats = self.minibatched_e_step(this_X, this_mask, these_prev_params)
+
+            # Incorporate expected stats from minibatch into rolling statistics
+            _update_fn = (
+                lambda rolling_stat, this_stat, scale:
+                (1-lr) * rolling_stat + lr * scale * this_stat
+            )
+            these_rolling_stats = tree_map(
+                _update_fn, these_prev_rolling_stats, these_stats, scaling_factor
+            )
+
+            # Maximize the posterior
+            G, this_Psi, this_Phi, Theta = self.m_step(*these_rolling_stats)
+
+            # Update the Psi and Phi of params and rolling stats at specified indices
+            Psi, Phi = prev_params[1], prev_params[2]
+            Psi = Psi.at[these_idxs[:,0],:].set(this_Psi)
+            Phi = Phi.at[these_idxs[:,1],:].set(this_Phi)
+            params = (G, Psi, Phi, Theta)
+
+            alpha_Psi, alpha_Phi = prev_rolling_stats[1], prev_rolling_stats[2]
+            alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta = these_rolling_stats
+            alpha_Psi = alpha_Psi.at[these_idxs[:,0],:].set(this_alpha_Psi)
+            alpha_Phi = alpha_Phi.at[these_idxs[:,1],:].set(this_alpha_Phi)
+            rolling_stats = (alpha_G, alpha_Psi, alpha_Phi, alpha_Theta)
+
+            # Calculate log-likelihood on full data
+            lp = self.log_prob(X, mask, params)
+
+            return (params, rolling_stats), lp
+
+        # Initialize parameters, rolling stats
+        params = init_params
+        rolling_stats = self._zero_rolling_stats(X, minibatch_size)
+        all_lps = []
+        for epoch in range(n_epochs):
+            batched_indices, remaining_indices = next(indices_iterator)
+            lrs = learning_rates[epoch]
+
+            # Scan through all complete minibatches
+            (params, rolling_stats), lps = lax.scan(
+                em_step, (params, rolling_stats), (batched_indices, lrs),
+            )
+
+            # Perform one final stochastic EM step over the incomplete minibatch
+            # Reuse last learning rate for simplicity; fine especiially if final
+            # minibatch is very incomplete.
+            if len(remaining_indices) > 0:
+                (params, rolling_stats), remaining_lp = em_step(
+                    (params, rolling_stats), (remaining_indices, lrs[-1])
+                )
+                lps = jnp.concatenate([lps[-1], remaining_lp])
+
+            all_lps.append(lps)
+
+        return params, jnp.array(all_lps)
