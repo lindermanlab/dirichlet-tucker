@@ -2,8 +2,11 @@ import warnings
 import jax.numpy as jnp
 import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
-from jax import jit
+from jax import jit, lax
 from tqdm.auto import trange
+import itertools
+
+from dtd.utils import ShuffleIndicesIterator
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
@@ -164,3 +167,148 @@ class DirichletTuckerDecomp:
             lps.append(lp)
 
         return params, jnp.stack(lps)
+
+    def _zero_rolling_stats(self, X, minibatch_size):
+        M, N, P = X.shape
+        return (jnp.zeros((self.K_M, self.K_N, self.K_P)),
+                jnp.zeros((minibatch_size, self.K_M)),
+                jnp.zeros((minibatch_size, self.K_N)),
+                jnp.zeros((self.K_P, P)),
+        )
+    
+    def _fancy_get_minibatch(self, these_idxs, X, mask, params, stats):
+        """Gather the samples associated with `these_idxs` from each input.
+
+        All the lax functions seem unnecessary >_< -- fancy indexing seems
+        to work just fine, see `_get_minibatch` function. Keeping here until
+        absolutely confirmed that lax slicing is unnecessary.
+
+        Parameters
+            these_idxs: shape (n_samples, batch_ndims)
+            X: data tensor, shape (b1, b2, e1)
+            mask: data mask, shape (b1, b2)
+            params: tuple of model parameters
+                G: shape (k1, k2, k3)
+                Psi: shape (b1, k1)
+                Phi: shape (b2, k2)
+                Theta: shape (e1, k3)
+            stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3)
+                alpha_Psi: shape (b1, k1)
+                alpha_Phi: shape (b2, k2)
+                alpha_Theta: shape (k3, e1)
+        
+        Returns
+            this_X: data tensor, shape (m, e1)
+            this_mask: data mask, shape (m)
+            these_params: tuple of model parameters
+                G: shape (k1, k2, k3), unchanged
+                Psi: shape (m, k1)
+                Phi: shape (m, k2)
+                Theta: shape (e1, k3), unchanged
+            these_stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3), unchanged
+                alpha_Psi: shape (m, k1)
+                alpha_Phi: shape (m, k2)
+                alpha_Theta: shape (k3, e1), unchanged
+        """
+        batch_ndims = int(these_idxs.shape[-1])
+        batch_shape = X.shape[:batch_ndims]
+        event_shape = X.shape[batch_ndims:]
+        event_ndims = len(event_shape)
+
+        X_slice_sizes = (1,)*len(batch_shape) + event_shape
+        mask_slice_sizes =(1,)*len(batch_shape)
+        Psi_slice_sizes = (1, self.K_M)
+        Phi_slice_sizes = (1, self.K_N)
+
+        X_dim_nums = lax.GatherDimensionNumbers(
+            offset_dims=tuple(i for i in range(1, event_ndims+1)),
+            collapsed_slice_dims=tuple(i for i in range(batch_ndims)),
+            start_index_map=tuple(i for i in range(batch_ndims))
+        )
+        mask_dim_nums = lax.GatherDimensionNumbers(
+            offset_dims=(),
+            collapsed_slice_dims=tuple(i for i in range(batch_ndims)),
+            start_index_map=tuple(i for i in range(batch_ndims))
+        )
+        factor_dim_nums = lax.GatherDimensionNumbers(
+            offset_dims=(1,),
+            collapsed_slice_dims=(0,),
+            start_index_map=(0,)
+        )
+
+        this_X = lax.gather(X, these_idxs, X_dim_nums, X_slice_sizes)
+        this_mask = lax.gather(mask, these_idxs, mask_dim_nums, mask_slice_sizes)
+
+        # Index into parameters and statistics
+        G, Psi, Phi, Theta = params
+        alpha_G, alpha_Psi, alpha_Phi, alpha_Theta = stats
+
+        # TODO Don't I need to lax.slice into `these_idxs`
+        # Returns: (minibatch_size, K_M)
+        this_Psi = lax.gather(Psi, these_idxs[:,[0]], factor_dim_nums, Psi_slice_sizes)
+        this_alpha_Psi = lax.gather(alpha_Psi, these_idxs[:,[0]], factor_dim_nums, Psi_slice_sizes)
+        
+        # Returns: (minibatch_size, K_N)
+        this_Phi = lax.gather(Phi, these_idxs[:,[1]], factor_dim_nums, Phi_slice_sizes)
+        this_alpha_Phi = lax.gather(alpha_Phi, these_idxs[:,[1]], factor_dim_nums, Phi_slice_sizes)
+        
+        return (this_X,
+                this_mask,
+                (G, this_Psi, this_Phi, Theta),
+                (alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta))
+    
+    def _get_minibatch(self, these_idxs, X, mask, params, stats):
+        """Fancy-index the samples associated with `these_idxs` from each input
+
+        Parameters
+            these_idxs: shape (m, batch_ndims)
+            X: data tensor, shape (b1, b2, e1)
+            mask: data mask, shape (b1, b2)
+            params: tuple of model parameters
+                G: shape (k1, k2, k3)
+                Psi: shape (b1, k1)
+                Phi: shape (b2, k2)
+                Theta: shape (e1, k3)
+            stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3)
+                alpha_Psi: shape (b1, k1)
+                alpha_Phi: shape (b2, k2)
+                alpha_Theta: shape (k3, e1)
+        
+        Returns
+            this_X: data tensor, shape (m, e1)
+            this_mask: data mask, shape (m)
+            these_params: tuple of model parameters
+                G: shape (k1, k2, k3), unchanged
+                Psi: shape (m, k1)
+                Phi: shape (m, k2)
+                Theta: shape (e1, k3), unchanged
+            these_stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3), unchanged
+                alpha_Psi: shape (m, k1)
+                alpha_Phi: shape (m, k2)
+                alpha_Theta: shape (k3, e1), unchanged
+        """
+        
+        this_X = X[these_idxs[:,0], these_idxs[:,1]]
+        this_mask = mask[these_idxs[:,0], these_idxs[:,1]]
+
+        # Index into parameters and statistics
+        G, Psi, Phi, Theta = params
+        alpha_G, alpha_Psi, alpha_Phi, alpha_Theta = stats
+
+        # Returns: (minibatch_size, K_M)
+        this_Psi = Psi[these_idxs[:,0], :]
+        this_alpha_Psi = alpha_Psi[these_idxs[:,0], :]
+        
+        # Returns: (minibatch_size, K_N)
+        this_Phi = Phi[these_idxs[:,1], :]
+        this_alpha_Phi = alpha_Phi[these_idxs[:,1], :]
+        
+        return (this_X,
+                this_mask,
+                (G, this_Psi, this_Phi, Theta),
+                (alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta))
+    
