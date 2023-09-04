@@ -171,8 +171,8 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     key = jr.PRNGKey(seed)
     key_mask, key_fit = jr.split(key)
 
-    # Load data from input directory
-    fpath_list = sorted([f for f in Path(datadir).iterdir() if f.is_file()])
+    # Load data from input directory. Search in all subdirectories
+    fpath_list = sorted([f for f in Path(datadir).rglob("*") if f.is_file()])
     data = load_data(fpath_list)
 
     # Create random mask to hold-out data for validation
