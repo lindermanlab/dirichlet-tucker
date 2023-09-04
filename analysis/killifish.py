@@ -96,7 +96,7 @@ def stochastic_fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
 
     # Fit model to data with EM
     print("Fitting model...", end="")
-    params, lps = model.stochasitc_fit(X, mask, init_params, n_epochs,
+    params, lps = model.stochastic_fit(X, mask, init_params, n_epochs,
                                        lr_schedule_fn, minibatch_size, key_fit)
     print("Done.")
 
@@ -181,15 +181,24 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
 
     # Cast integer counts to float32 dtype
     X = jnp.asarray(data['X'], dtype=jnp.float32)
+
+    # Get total counts. Since any random batch indices should give the same number
+    # counts, i.e. if X has batch_axes of (0,1), then X[i,j].sum() = C for all i,j,
+    # and since we assume that the batch axes are the leading dimensions, we can
+    # calculate the total counts  of data by abusing data['batch_axes'] as indices
+    total_counts = float(X[data['batch_axes']].sum())
+    assert total_counts.is_integer(), \
+        f'Expected `total_counts` to be integer values, but got {total_counts}'
+    total_counts = int(total_counts)
     del data
 
     # Fit the model
     params, lps = stochastic_fit_model(
-        key_fit, X, mask, k1, k2, k3, alpha, n_epochs=n_epochs,
+        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha, n_epochs=n_epochs,
     )
 
     # Evaluate the model on heldout samples
-    test_ll, pct_dev = evaluate_fit(params, X, mask, k1, k2, k3, alpha)
+    test_ll, pct_dev = evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha)
 
     # ==========================================================================
     # Log metrics
