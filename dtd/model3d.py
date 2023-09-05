@@ -392,7 +392,7 @@ class DirichletTuckerDecomp:
                              'learning_rate': lr,},
                              step=epoch*n_minibatches_per_epoch+i,
                              commit=False)
-                wnb.log({'epoch_time': epoch_elapsed_time},
+                wnb.log({'epoch_time [min]': epoch_elapsed_time/60},
                         (epoch+1)*n_minibatches_per_epoch-1,
                         commit=True)
                 

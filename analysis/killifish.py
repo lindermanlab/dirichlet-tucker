@@ -415,7 +415,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     if use_wandb:
         wnb.summary["pct_dev"] = pct_dev
         wnb.summary["avg_test_ll"] = test_ll / (~mask).sum()
-        wnb.summary['total_time'] = run_elapsed_time
+        wnb.summary['total_time [min]'] = run_elapsed_time/60
 
         wandb.save(str(fpath_topics), policy='now')
         wandb.save(str(fpath_bases), policy='now') 
