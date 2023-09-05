@@ -113,20 +113,23 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
     print("Evaluating fit...", end="")
     test_ll = model.heldout_log_likelihood(X, mask, params)
 
-    # Compute test ll under baseline model (empirical average of syllable usage)
-    baseline_probs = jnp.mean(X[mask], axis=0)  # TODO does X[mask] actually still preserve X shape? Shouldn't this sum over batch_axes?
+    # Compute test ll under baseline model (average syllable usage across all held-in samples)
+    # - baseline_probs: (D3,)
+    baseline_probs = jnp.mean(X[mask], axis=0)
     baseline_probs /= baseline_probs.sum(axis=-1, keepdims=True)
     baseline_test_ll = \
         tfd.Multinomial(total_counts, probs=baseline_probs).log_prob(X[~mask]).sum()
 
-    # Compute test ll under under saturated model (true empiral syllable usage)
+    # Compute test ll under under saturated model (true empirical syllable usage)
+    # - saturated_probs = X / total_counts: (D1, D2, D3)
     saturated_probs = X / X.sum(axis=-1, keepdims=True)
     saturated_test_ll = \
-        tfd.Multinomial(total_counts, probs=saturated_probs).log_prob(X[~mask]).sum()
+        jnp.where(~mask, tfd.Multinomial(total_counts, probs=saturated_probs).log_prob(X), 0.0).sum()
 
     # Compute test log likelihood percent deviation of fitted model from
     # saturated model (upper bound), relative to baseline (lower bound).
     pct_dev = (test_ll - baseline_test_ll) / (saturated_test_ll - baseline_test_ll)
+    pct_dev *= 100
     print("Done.")
 
     return test_ll, pct_dev
@@ -172,7 +175,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     # ==========================================================================
 
     run_start_time = time.time()
-    
+
     key = jr.PRNGKey(seed)
     key_mask, key_fit = jr.split(key)
 
