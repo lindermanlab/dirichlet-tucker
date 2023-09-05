@@ -190,7 +190,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     # Cast integer counts to float32 dtype
     X = jnp.asarray(data['X'], dtype=jnp.float32)
     print("Done.")
-    print(f"\tData array: shape ({X.shape}), {X.nbytes/(1024**3):.1f}GB")
+    print(f"\tData array: shape {X.shape}, {X.nbytes/(1024**3):.1f}GB")
 
     # Create random mask to hold-out data for validation
     batch_shape = _get_subshape(data['X'], data['batch_axes'])
