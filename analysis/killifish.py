@@ -61,7 +61,7 @@ def get_unique_path(fpath, fmt='02d'):
         i += 1
     return fpath
 
-def set_syllable_cluster_ticks(ax=None, axis='y', font_kws={'fontsize': 'small'}):
+def set_syllable_cluster_ticks(ax=None, axis='x', font_kws={'fontsize': 'small'}):
     """Label specified axis with syllable _cluster_ names."""
 
     if ax is None:
@@ -96,7 +96,6 @@ def set_syllable_cluster_ticks(ax=None, axis='y', font_kws={'fontsize': 'small'}
 
 def draw_syllable_factors(params):
     # Permute syllables to match our KL-clustering for better interpretability
-    # shape (K3, D3)
     syllable_factors = params[3][:,SYLLABLE_PERM]
     K, D = syllable_factors.shape
 
@@ -111,7 +110,7 @@ def draw_syllable_factors(params):
     fig = plt.figure(figsize=(16, 4.5), dpi=96)
     ax = plt.gca()
     im = ax.imshow(syllable_factors, interpolation='none', aspect='auto',
-                   cmap='rocket', norm=mplc.LogNorm(0.5/D, 1.0))
+                   cmap='magma', norm=mplc.LogNorm(0.5/D, 1.0))
     set_syllable_cluster_ticks(ax)
     plt.colorbar(im, ax=ax, extend='min')
 
@@ -150,6 +149,9 @@ def draw_circadian_bases(params):
     basis_perm = onp.argsort(t_peak, kind='stable')
     circadian_bases = circadian_bases[:, basis_perm]
 
+    # Share a common a y-axis
+    ymax = circadian_bases.max()
+
     # ------------------------------------------------------------------------
     fig, axs = plt.subplots(nrows=K, ncols=1, squeeze=True,
                             gridspec_kw={'hspace':0.1}, figsize=(8,9), dpi=96)
@@ -161,8 +163,8 @@ def draw_circadian_bases(params):
         # Grey out background if factor L2 norm is below a threshold
         mag = onp.linalg.norm(circadian_bases[:,k])
         if mag <= 0.3:
-            ax.set_facecolor('0.4')
-            ax.annotate(f'|factor|={mag:.2f}', (0.05,0.9), xycoords='axes fraction',
+            ax.set_facecolor('0.8')
+            ax.annotate(f'|factor|={mag:.2f}', (0.01,0.9), xycoords='axes fraction',
                         va='top', fontsize='small')
         
         # Label x-axis with time-of-day from 0H - 24H, every 2H
@@ -178,7 +180,7 @@ def draw_circadian_bases(params):
             ax.set_ylabel('time-of-day factors / "circadian bases"')
 
         # Set axis limits; reduce blank space margins
-        ax.set_ylim(bottom=0, top=1)
+        ax.set_ylim(bottom=0, top=ymax)
         ax.margins(x=0.01, y=0.5)
 
         # Draw time-of-day ticks; only annotate bottom-most subplot
@@ -395,16 +397,16 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     
     # Save results locally
     fpath_params = outdir/'params.npz'
-    onp.savez_compressed(G=params[0], F1=params[1], F2=params[2], F3=params[3])
+    onp.savez_compressed(fpath_params, G=params[0], F1=params[1], F2=params[2], F3=params[3])
     
     plt.figure(fig_topics)
     fpath_topics = get_unique_path(outdir/'behavioral-topics.png')
-    plt.savefig(fpath_topics, layout='tight')
+    plt.savefig(fpath_topics, bbox_inches='tight')
     plt.close()
 
     plt.figure(fig_bases)
     fpath_bases = get_unique_path(outdir/'circadian-bases.png')
-    plt.savefig(fpath_bases, layout='tight')
+    plt.savefig(fpath_bases, bbox_inches='tight')
     plt.close()
 
     # Log summry metrics. lps are logged by model.stochastic_fit
@@ -413,9 +415,8 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
         wnb.summary["avg_test_ll"] = test_ll / (~mask).sum()
         wnb.summary['total_time'] = run_elapsed_time
 
-        wandb.log({'behavioral-topics': fig_topics,
-                   'circadian-bases': fig_bases})
-        
+        wandb.save(str(fpath_topics), policy='now')
+        wandb.save(str(fpath_bases), policy='now') 
         wandb.save(str(fpath_params), policy='now')
         wandb.finish()
 
