@@ -304,6 +304,9 @@ class DirichletTuckerDecomp:
         
         # Define learning rate schedule and split in complete and incomplete lrs
         n_minibatches_per_epoch = indices_iterator.n_complete
+        assert n_minibatches_per_epoch > 0, \
+            f"Expected n_minibatches_per_epoch > 0. Got minibatch_size={minibatch_size}, perhaps misspecified?"
+        
         schedule = lr_schedule_fn(n_minibatches_per_epoch, n_epochs)
         
         learning_rates = schedule(jnp.arange(n_minibatches_per_epoch*n_epochs))
@@ -392,6 +395,10 @@ class DirichletTuckerDecomp:
                 wnb.log({'epoch_time': epoch_elapsed_time},
                         (epoch+1)*n_minibatches_per_epoch-1,
                         commit=True)
+                
+            # Check for NaNs, to more quickly identify failing!
+            if jnp.any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
+                raise ValueError(f"Expected params to be finite, but got\n{params}")
             
             all_lps.append(lps)
 
