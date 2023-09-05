@@ -397,7 +397,7 @@ class DirichletTuckerDecomp:
                         commit=True)
                 
             # Check for NaNs, to more quickly identify failing!
-            if jnp.any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
+            if any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
                 raise ValueError(f"Expected params to be finite, but got\n{params}")
             
             all_lps.append(lps)
