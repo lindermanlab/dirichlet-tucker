@@ -384,11 +384,14 @@ class DirichletTuckerDecomp:
 
             # Log metrics to WandB
             if wnb is not None:
-                for lp, lr in zip(lps, lrs):
+                for i, (lp, lr) in enumerate(zip(lps, lrs)):
                     wnb.log({'avg_lp': lp / mask.sum(),
-                             'learning_rate': lr,
-                             }, commit=False)
-                wnb.log({'epoch_time': epoch_elapsed_time}, commit=True)
+                             'learning_rate': lr,},
+                             step=epoch*n_minibatches_per_epoch+i,
+                             commit=False)
+                wnb.log({'epoch_time': epoch_elapsed_time},
+                        (epoch+1)*n_minibatches_per_epoch-1,
+                        commit=True)
             
             all_lps.append(lps)
 
