@@ -236,7 +236,7 @@ def make_random_mask(key, shape, train_frac=0.8):
     return jr.bernoulli(key, train_frac, shape)
 
 def fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
-              lr_schedule_fn=None, minibatch_size=20, n_epochs=100,
+              lr_schedule_fn=None, minibatch_size=1024, n_epochs=100,
               wnb=None):
     """Fit 3D DTD model to data using stochastic fit algoirthm.
 
@@ -316,7 +316,7 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
               help='Random seed for initialization.')
 @click.option('--train', 'train_frac', type=float, default=0.8,
               help='Fraction of .')
-@click.option('--minibatch', 'minibatch_size', type=int, default=20,
+@click.option('--minibatch', 'minibatch_size', type=int, default=1024,
               help='Number of samples per minibatch')
 @click.option('--epoch', 'n_epochs', type=int, default=5000,
               help='Number of epochs of stochastic EM to run.')
@@ -325,7 +325,7 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
 @click.option('--outdir', type=click.Path(file_okay=False, resolve_path=True, path_type=Path),
               default='./', help='Local directory to save results to.')
 def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
-            minibatch_size=20, n_epochs=5000, use_wandb=False, outdir=None):
+            minibatch_size=1024, n_epochs=5000, use_wandb=False, outdir=None):
     """Fit data to one set of model parameters."""
     
     print(f"Loading data from...{str(datadir)}")
@@ -381,7 +381,8 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
 
     # Fit the model
     params, lps = fit_model(
-        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha, n_epochs=n_epochs, wnb=wnb
+        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha,
+        minibatch_size=minibatch_size, n_epochs=n_epochs, wnb=wnb
     )
 
     # Evaluate the model on heldout samples
