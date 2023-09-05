@@ -323,7 +323,7 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
 @click.option('--wandb', 'use_wandb', is_flag=True,
               help='Log run with WandB')
 @click.option('--outdir', type=click.Path(file_okay=False, resolve_path=True, path_type=Path),
-              default='./', help='Local directory to save results to.')
+              default='./', help='Local directory to save results and wandb logs to.')
 def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
             minibatch_size=1024, n_epochs=5000, use_wandb=False, outdir=None):
     """Fit data to one set of model parameters."""
@@ -342,7 +342,8 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
                 'seed': seed,
                 'minibatch_size': minibatch_size,
                 'n_epochs': n_epochs,
-            }
+            },
+            dir=str(outdir),
         )
         wandb.define_metric('avg_lp', summary='min')
     else:
