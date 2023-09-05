@@ -172,15 +172,18 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     key_mask, key_fit = jr.split(key)
 
     # Load data from input directory. Search in all subdirectories
+    print("Loading data...",end="")
     fpath_list = sorted([f for f in Path(datadir).rglob("*") if f.is_file()])
     data = load_data(fpath_list)
+
+    # Cast integer counts to float32 dtype
+    X = jnp.asarray(data['X'], dtype=jnp.float32)
+    print("Done.")
+    print(f"\tData array: shape ({X.shape}), {X.nbytes/(1024**3):.1f}GB")
 
     # Create random mask to hold-out data for validation
     batch_shape = _get_subshape(data['X'], data['batch_axes'])
     mask = make_random_mask(key_mask, batch_shape, train_frac)
-
-    # Cast integer counts to float32 dtype
-    X = jnp.asarray(data['X'], dtype=jnp.float32)
 
     # Get total counts. Since any random batch indices should give the same number
     # counts, i.e. if X has batch_axes of (0,1), then X[i,j].sum() = C for all i,j,
