@@ -373,7 +373,7 @@ class DirichletTuckerDecomp:
                 (params, rolling_stats), remaining_lp = em_step(
                     (params, rolling_stats), (remaining_indices, lrs[-1])
                 )
-                lps = jnp.concatenate([lps[-1], remaining_lp])
+                lps = jnp.concatenate([lps, jnp.atleast_1d(remaining_lp)])
 
             all_lps.append(lps)
 

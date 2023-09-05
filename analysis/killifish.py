@@ -203,7 +203,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     # ==========================================================================
     # Log metrics
     if use_wandb:
-        for lp in lps:
+        for lp in lps.ravel():
             wandb.log({'avg_lp': lp / mask.sum()}, commit=False)
         wandb.run.summary["pct_dev"] = pct_dev
         wandb.run.summary["avg_test_ll"] = test_ll / (~mask).sum()
