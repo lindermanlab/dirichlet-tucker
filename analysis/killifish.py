@@ -67,8 +67,9 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def stochastic_fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
-                         lr_schedule_fn=None, minibatch_size=20, n_epochs=100):
+def fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
+              lr_schedule_fn=None, minibatch_size=20, n_epochs=100,
+              wnb=None):
     """Fit 3D DTD model to data using stochastic fit algoirthm.
 
     (New) parameters
@@ -79,6 +80,8 @@ def stochastic_fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
             Number of samples per minibatch.
         n_epochs: int
             Number of full passes through the dataset to perform
+        wnb: wandb.Run or None
+            WandB Run instance for logging metrics per epoch
     """
 
     key_init, key_fit = jr.split(key)
@@ -98,7 +101,7 @@ def stochastic_fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
     # Fit model to data with EM
     print("Fitting model...", end="")
     params, lps = model.stochastic_fit(X, mask, init_params, n_epochs,
-                                       lr_schedule_fn, minibatch_size, key_fit)
+                                       lr_schedule_fn, minibatch_size, key_fit, wnb=wnb)
     print("Done.")
 
     return params, lps
@@ -204,7 +207,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     del data
 
     # Fit the model
-    params, lps = stochastic_fit_model(
+    params, lps = fit_model(
         key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha, n_epochs=n_epochs, wnb=wnb
     )
 
@@ -214,7 +217,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     run_elapsed_time = time.time() - run_start_time
 
     # ==========================================================================
-    # Log summry metrics. lps are logged by stochastic_fit_model
+    # Log summry metrics. lps are logged by model.stochastic_fit
     if use_wandb:
         wnb.summary["pct_dev"] = pct_dev
         wnb.summary["avg_test_ll"] = test_ll / (~mask).sum()
