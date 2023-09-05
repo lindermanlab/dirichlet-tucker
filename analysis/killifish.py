@@ -16,6 +16,7 @@ tfd = tfp.distributions
 from tqdm.auto import trange
 import wandb
 import matplotlib.pyplot as plt
+import time
 
 from dtd.model3d import DirichletTuckerDecomp
 
@@ -152,7 +153,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     """Fit data to one set of model parameters."""
     
     if use_wandb:
-        wandb.init(
+        wnb = wandb.init(
             project=PROJECT_NAME,
             config={
                 'k1': k1,
@@ -165,9 +166,13 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
             }
         )
         wandb.define_metric('avg_lp', summary='min')
+    else:
+        wnb = None
     
     # ==========================================================================
 
+    run_start_time = time.time()
+    
     key = jr.PRNGKey(seed)
     key_mask, key_fit = jr.split(key)
 
@@ -197,19 +202,20 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
 
     # Fit the model
     params, lps = stochastic_fit_model(
-        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha, n_epochs=n_epochs,
+        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha, n_epochs=n_epochs, wnb=wnb
     )
 
     # Evaluate the model on heldout samples
     test_ll, pct_dev = evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha)
 
+    run_elapsed_time = time.time() - run_start_time
+
     # ==========================================================================
-    # Log metrics
+    # Log summry metrics. lps are logged by stochastic_fit_model
     if use_wandb:
-        for lp in lps.ravel():
-            wandb.log({'avg_lp': lp / mask.sum()}, commit=False)
-        wandb.run.summary["pct_dev"] = pct_dev
-        wandb.run.summary["avg_test_ll"] = test_ll / (~mask).sum()
+        wnb.summary["pct_dev"] = pct_dev
+        wnb.summary["avg_test_ll"] = test_ll / (~mask).sum()
+        wnb.summary['total_time'] = run_elapsed_time
         wandb.finish()
 
     return

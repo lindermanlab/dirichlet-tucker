@@ -4,9 +4,9 @@ import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 from jax import jit, lax
 from jax.tree_util import tree_map
-import optax
 from tqdm.auto import trange
 import itertools
+import time
 
 from dtd.utils import ShuffleIndicesIterator
 
@@ -275,7 +275,7 @@ class DirichletTuckerDecomp:
         return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
     
     def stochastic_fit(self, X, mask, init_params, n_epochs,
-                       lr_schedule_fn, minibatch_size, key):
+                       lr_schedule_fn, minibatch_size, key, wnb=None):
         """Fit model parameters to data using stochastic expectation maximization.
         
         Parameters
@@ -288,6 +288,9 @@ class DirichletTuckerDecomp:
                 Number of data samples to fit on, sampled uniformly from the batch dimensions.
             key (PRNGKey):
                 PRNGKey to shuffle data loading order at each epoch
+            wnb (WandB instance, [optional]):
+                If WandB instance passed in, log average lps and learning rates
+                for every epoch.
         
         Returns
             params
@@ -357,7 +360,9 @@ class DirichletTuckerDecomp:
         params = init_params
         rolling_stats = self._zero_rolling_stats(X, minibatch_size)
         all_lps = []
-        for epoch in range(n_epochs):
+        for epoch in trange(n_epochs):
+            epoch_start_time = time.time()
+
             batched_indices, remaining_indices = next(indices_iterator)
             lrs = learning_rates[epoch]
 
@@ -375,6 +380,16 @@ class DirichletTuckerDecomp:
                 )
                 lps = jnp.concatenate([lps, jnp.atleast_1d(remaining_lp)])
 
+            epoch_elapsed_time = time.time() - epoch_start_time
+
+            # Log metrics to WandB
+            if wnb is not None:
+                for lp, lr in zip(lps, lrs):
+                    wnb.log({'avg_lp': lp / mask.sum(),
+                             'learning_rate': lr,
+                             }, commit=False)
+                wnb.log({'epoch_time': epoch_elapsed_time}, commit=True)
+            
             all_lps.append(lps)
 
         return params, jnp.array(all_lps)
