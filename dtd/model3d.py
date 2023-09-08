@@ -177,8 +177,10 @@ class DirichletTuckerDecomp:
 
             # Log metrics to WandB
             if wnb is not None:
-                wnb.log({'avg_lp': lp / mask.sum()}, step=itr, commit=False)
-                wnb.log({'epoch_time': epoch_elapsed_time}, itr, commit=True)
+                wnb.log({'avg_lp': lp / mask.sum(), 'epoch':itr},
+                        step=itr, commit=False)
+                wnb.log({'epoch_time': epoch_elapsed_time, 'epoch':itr},
+                        step=itr, commit=True)
 
         return params, jnp.stack(lps)
 
@@ -398,11 +400,15 @@ class DirichletTuckerDecomp:
             if wnb is not None:
                 for i, (lp, lr) in enumerate(zip(lps, lrs)):
                     wnb.log({'avg_lp': lp / mask.sum(),
-                             'learning_rate': lr,},
+                             'learning_rate': lr,
+			     'epoch': epoch+(i+1)/n_minibatches_per_epoch},
                              step=epoch*n_minibatches_per_epoch+i,
                              commit=False)
-                wnb.log({'epoch_time [min]': epoch_elapsed_time/60}, step=epoch,
-                        commit=True)
+                
+                    wnb.log({'epoch_time [min]': epoch_elapsed_time/60,
+                           'epoch': epoch},
+                           step=(epoch+1)*n_minibatches_per_epoch-1,
+                           commit=True)
                 
             # Check for NaNs, to more quickly identify failing!
             if any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
