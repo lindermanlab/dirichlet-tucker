@@ -235,9 +235,9 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
-              lr_schedule_fn=None, minibatch_size=1024, n_epochs=100,
-              wnb=None):
+def fit_full_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
+                   lr_schedule_fn=None, minibatch_size=1024, n_epochs=100,
+                   wnb=None):
     """Fit 3D DTD model to data using stochastic fit algoirthm.
 
     (New) parameters
@@ -254,9 +254,6 @@ def fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
 
     key_init, key_fit = jr.split(key)
 
-    # Set default learning rate schedule function if none provided
-    lr_schedule_fn = lr_schedule_fn if lr_schedule_fn is not None else DEFAULT_LR_SCHEDULE_FN
-
     # Construct a model
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
@@ -268,8 +265,49 @@ def fit_model(key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
 
     # Fit model to data with EM
     print("Fitting model...", end="")
-    params, lps = model.stochastic_fit(X, mask, init_params, n_epochs,
-                                       lr_schedule_fn, minibatch_size, key_fit, wnb=wnb)
+    params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
+    print("Done.")
+
+    return params, lps
+
+def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
+              lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, wnb=None):
+    """Fit 3D DTD model to data using stochastic fit algoirthm.
+
+    (New) parameters
+        lr_schedule_fn: Callable[[int, int], optax.Schedule]
+            Given `n_minibatches` and `n_epochs`, returns a function mapping step
+            counts to learning rate value.
+        minibatch_size: int
+            Number of samples per minibatch.
+        n_epochs: int
+            Number of full passes through the dataset to perform
+        wnb: wandb.Run or None
+            WandB Run instance for logging metrics per epoch
+    """
+
+    key_init, key_fit = jr.split(key)
+
+    # Construct a model
+    model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
+
+    # Randomly initialize parameters
+    print("Initializing model...", end="")
+    d1, d2, d3 = X.shape
+    init_params = model.sample_params(key_init, d1, d2, d3)
+    print("Done.")
+
+    # Fit model to data with EM
+    print(f"Fitting model with {method} EM...", end="")
+    if method == 'stochastic':
+        # Set default learning rate schedule function if none provided
+        lr_schedule_fn = lr_schedule_fn if lr_schedule_fn is not None else DEFAULT_LR_SCHEDULE_FN
+
+        params, lps = model.stochastic_fit(X, mask, init_params, n_epochs,
+                                           lr_schedule_fn, minibatch_size, key_fit, wnb=wnb)
+    else:
+        params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
+    
     print("Done.")
 
     return params, lps
@@ -316,16 +354,21 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
               help='Random seed for initialization.')
 @click.option('--train', 'train_frac', type=float, default=0.8,
               help='Fraction of .')
-@click.option('--minibatch', 'minibatch_size', type=int, default=1024,
-              help='Number of samples per minibatch')
+@click.option('--method', type=str, default='full',
+              help="'full' for full-batch em, 'stochastic' for stochastic em" )
 @click.option('--epoch', 'n_epochs', type=int, default=5000,
-              help='Number of epochs of stochastic EM to run.')
+              help='# iterations of full-batch EM to run/# epochs of stochastic EM to run.')
+@click.option('--minibatch', 'minibatch_size', type=int, default=1024,
+              help='# samples per minibatch, if METHOD=stochastic.')
+@click.option('--max-samples', type=int, default=-1,
+              help='Maximum number of samples to load, performed by truncating first mode of dataset. Default: [-1], load all.')
 @click.option('--wandb', 'use_wandb', is_flag=True,
               help='Log run with WandB')
 @click.option('--outdir', type=click.Path(file_okay=False, resolve_path=True, path_type=Path),
               default='./', help='Local directory to save results and wandb logs to.')
 def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
-            minibatch_size=1024, n_epochs=5000, use_wandb=False, outdir=None):
+            method='full', minibatch_size=1024, n_epochs=5000, max_samples=-1,
+            use_wandb=False, outdir=None):
     """Fit data to one set of model parameters."""
     
     print(f"Loading data from...{str(datadir)}")
@@ -340,10 +383,10 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
                 'k3': k3,
                 'alpha': alpha,
                 'seed': seed,
+                'method': method,
                 'minibatch_size': minibatch_size,
-                'n_epochs': n_epochs,
-            },
-            dir=str(outdir),
+                'max_samples': max_samples
+            }
         )
         wandb.define_metric('avg_lp', summary='min')
     else:
@@ -362,12 +405,12 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     data = load_data(fpath_list)
 
     # Cast integer counts to float32 dtype
-    X = jnp.asarray(data['X'], dtype=jnp.float32)
+    X = jnp.asarray(data['X'], dtype=jnp.float32)[:max_samples]
     print("Done.")
     print(f"\tData array: shape {X.shape}, {X.nbytes/(1024**3):.1f}GB")
 
     # Create random mask to hold-out data for validation
-    batch_shape = _get_subshape(data['X'], data['batch_axes'])
+    batch_shape = _get_subshape(X, data['batch_axes'])
     mask = make_random_mask(key_mask, batch_shape, train_frac)
 
     # Get total counts. Since any random batch indices should give the same number
@@ -382,9 +425,8 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
 
     # Fit the model
     params, lps = fit_model(
-        key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha,
-        minibatch_size=minibatch_size, n_epochs=n_epochs, wnb=wnb
-    )
+            method, key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha,
+            minibatch_size=minibatch_size, n_epochs=n_epochs, wnb=wnb)
 
     # Evaluate the model on heldout samples
     test_ll, pct_dev = evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha)
