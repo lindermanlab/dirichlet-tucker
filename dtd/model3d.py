@@ -155,7 +155,7 @@ class DirichletTuckerDecomp:
         return self.C * jnp.einsum('ijk, mi, nj, kp->mnp', *params)
 
     # Fit the model!
-    def fit(self, X, mask, init_params, num_iters):
+    def fit(self, X, mask, init_params, num_iters, wnb=None):
 
         @jit
         def em_step(X, mask, params):
@@ -168,8 +168,17 @@ class DirichletTuckerDecomp:
         params = init_params
         lps = []
         for itr in trange(num_iters):
+            epoch_start_time = time.time()
+            
             lp, params = em_step(X, mask, params)
             lps.append(lp)
+
+            epoch_elapsed_time = time.time() - epoch_start_time
+
+            # Log metrics to WandB
+            if wnb is not None:
+                wnb.log({'avg_lp': lp / mask.sum()}, step=itr, commit=False)
+                wnb.log({'epoch_time': epoch_elapsed_time}, itr, commit=True)
 
         return params, jnp.stack(lps)
 
@@ -392,8 +401,7 @@ class DirichletTuckerDecomp:
                              'learning_rate': lr,},
                              step=epoch*n_minibatches_per_epoch+i,
                              commit=False)
-                wnb.log({'epoch_time [min]': epoch_elapsed_time/60},
-                        (epoch+1)*n_minibatches_per_epoch-1,
+                wnb.log({'epoch_time [min]': epoch_elapsed_time/60}, step=epoch,
                         commit=True)
                 
             # Check for NaNs, to more quickly identify failing!
