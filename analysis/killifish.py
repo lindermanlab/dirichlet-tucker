@@ -345,9 +345,9 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
 
 @click.command()
 @click.argument('datadir', type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.argument('k1', type=int,)
-@click.argument('k2', type=int,)
-@click.argument('k3', type=int,)
+@click.option('--k1', type=int,)
+@click.option('--k2', type=int,)
+@click.option('--k3', type=int,)
 @click.option('--alpha', type=float, default=1.1,
               help='Concentration of Dirichlet prior.')
 @click.option('--seed',type=int, default=0,
