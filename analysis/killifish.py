@@ -57,7 +57,7 @@ SYLLABLE_PERM = list(itertools.chain.from_iterable(SYLLABLE_PERM_DICT.values()))
 def get_unique_path(fpath, fmt='02d'):
     i = 1
     while fpath.is_file():
-	stem = '-'.join(fpath.stem.split('-')[:-1])
+        stem = '-'.join(fpath.stem.split('-')[:-1])
         fpath = fpath.parent / f'{stem}-{i:{fmt}}{fpath.suffix}'
         i += 1
     return fpath
