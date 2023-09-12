@@ -2,8 +2,13 @@ import warnings
 import jax.numpy as jnp
 import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
-from jax import jit
+from jax import jit, lax
+from jax.tree_util import tree_map
 from tqdm.auto import trange
+import itertools
+import time
+
+from dtd.utils import ShuffleIndicesIterator
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
@@ -24,6 +29,9 @@ class DirichletTuckerDecomp:
         self.K_N = K_N
         self.K_P = K_P
         self.alpha = alpha
+
+        self.batch_ndims = 2
+        self.event_ndims = 1
 
     def sample_params(self, key, M, N, P):
         """Sample a data tensor and parameters from the model.
@@ -147,7 +155,7 @@ class DirichletTuckerDecomp:
         return self.C * jnp.einsum('ijk, mi, nj, kp->mnp', *params)
 
     # Fit the model!
-    def fit(self, X, mask, init_params, num_iters):
+    def fit(self, X, mask, init_params, num_iters, wnb=None):
 
         @jit
         def em_step(X, mask, params):
@@ -160,7 +168,252 @@ class DirichletTuckerDecomp:
         params = init_params
         lps = []
         for itr in trange(num_iters):
+            epoch_start_time = time.time()
+            
             lp, params = em_step(X, mask, params)
             lps.append(lp)
 
+            epoch_elapsed_time = time.time() - epoch_start_time
+
+            # Log metrics to WandB
+            if wnb is not None:
+                wnb.log({'avg_lp': lp / mask.sum(), 'epoch':itr},
+                        step=itr, commit=False)
+                wnb.log({'epoch_time': epoch_elapsed_time, 'epoch':itr},
+                        step=itr, commit=True)
+
         return params, jnp.stack(lps)
+
+    def _zero_rolling_stats(self, X, minibatch_size):
+        M, N, P = X.shape
+        return (jnp.zeros((self.K_M, self.K_N, self.K_P)),
+                jnp.zeros((minibatch_size, self.K_M)),
+                jnp.zeros((minibatch_size, self.K_N)),
+                jnp.zeros((self.K_P, P)),
+        )
+    
+    def _get_minibatch(self, these_idxs, X, mask, params, stats):
+        """Fancy-index the samples associated with `these_idxs` from each input
+
+        Parameters
+            these_idxs: shape (m, batch_ndims)
+            X: data tensor, shape (b1, b2, e1)
+            mask: data mask, shape (b1, b2)
+            params: tuple of model parameters
+                G: shape (k1, k2, k3)
+                Psi: shape (b1, k1)
+                Phi: shape (b2, k2)
+                Theta: shape (e1, k3)
+            stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3)
+                alpha_Psi: shape (b1, k1)
+                alpha_Phi: shape (b2, k2)
+                alpha_Theta: shape (k3, e1)
+        
+        Returns
+            this_X: data tensor, shape (m, e1)
+            this_mask: data mask, shape (m)
+            these_params: tuple of model parameters
+                G: shape (k1, k2, k3), unchanged
+                Psi: shape (m, k1)
+                Phi: shape (m, k2)
+                Theta: shape (e1, k3), unchanged
+            these_stats: tuple of expected sufficient statistics
+                alpha_G: shape (k1, k2, k3), unchanged
+                alpha_Psi: shape (m, k1)
+                alpha_Phi: shape (m, k2)
+                alpha_Theta: shape (k3, e1), unchanged
+        """
+        
+        this_X = X[these_idxs[:,0], these_idxs[:,1]]
+        this_mask = mask[these_idxs[:,0], these_idxs[:,1]]
+
+        # Index into parameters and statistics
+        G, Psi, Phi, Theta = params
+        alpha_G, alpha_Psi, alpha_Phi, alpha_Theta = stats
+
+        # Returns: (minibatch_size, K_M)
+        this_Psi = Psi[these_idxs[:,0], :]
+        this_alpha_Psi = alpha_Psi[these_idxs[:,0], :]
+        
+        # Returns: (minibatch_size, K_N)
+        this_Phi = Phi[these_idxs[:,1], :]
+        this_alpha_Phi = alpha_Phi[these_idxs[:,1], :]
+        
+        return (this_X,
+                this_mask,
+                (G, this_Psi, this_Phi, Theta),
+                (alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta))
+    
+    def minibatched_e_step(self, X, mask, params):
+        """Compute posterior expected sufficient statistics of parameters from a minibatch of data.
+        
+        We are given a minibatch of data, e.g. X has shape (B,P). Contrast this
+        with the data input of the full-batch `e_step`, where X has shape (M,N,P).
+        Additionally, only the parameters relevant to the minibatch are provided.
+
+        Parameters
+            X: (B, P) count tensor
+            mask: (B,) binary matrix specifying held-out samples.
+            params: tuple of arrays
+                G: shape (K_M, K_N, K_P)
+                Psi: shape (B, K_M)
+                Phi: shape (B, K_N)
+                Theta: shape (K_P, P)
+        
+        Returns
+            alpha_G: shape (K_M, K_N, K_P)
+            alpha_Psi: shape (B, K_M)
+            alpha_Phi: shape (B, K_N)
+            alpha_Theta: shape (K_P, P)
+        """
+
+        # Note the different einsum notation when working with minibatched data.
+        # This is equivalent to calculating the full tensor associated with these
+        # parameters, then taking the principle diagonal along the batch dims.
+        probs = jnp.einsum('ijk,bi,bj,kp->bp', *params)
+        relative_probs = jnp.einsum('ijk,bi,bj,kp->ijkbp', *params)
+        relative_probs /= probs
+        E_Z = X * mask[..., None] * relative_probs
+
+        # Note how E_z has collapsed the batch dimensions into a single axis.
+        # This changes the indexing and which axes are being summed over.
+        alpha_G = jnp.sum(E_Z, axis=(3,4))
+        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4)).T
+        alpha_Phi = jnp.sum(E_Z, axis=(0,2,4)).T
+        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3))
+
+        return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
+    
+    def stochastic_fit(self, X, mask, init_params, n_epochs,
+                       lr_schedule_fn, minibatch_size, key, wnb=None):
+        """Fit model parameters to data using stochastic expectation maximization.
+        
+        Parameters
+
+            n_epochs (int):
+                Number of epochs, or passes through the full dataset, to run.
+            lr_schedule_fn (Callable[[n_minibatches, n_epochs], optax.Schedule]):
+                Given (n_minibatches, n_epochs), returns an optax.Schedule
+            minibatch_size (int):
+                Number of data samples to fit on, sampled uniformly from the batch dimensions.
+            key (PRNGKey):
+                PRNGKey to shuffle data loading order at each epoch
+            wnb (WandB instance, [optional]):
+                If WandB instance passed in, log average lps and learning rates
+                for every epoch.
+        
+        Returns
+            params
+            lps: (n_epoch, n_total_minibatches_per_epoch)
+            
+        """
+
+        # Instantiate an iterator that produces minibatches of indices into the data
+        batch_shape = X.shape[:self.batch_ndims]
+        indices_iterator = ShuffleIndicesIterator(key, batch_shape, minibatch_size)
+        
+        # Define learning rate schedule and split in complete and incomplete lrs
+        n_minibatches_per_epoch = indices_iterator.n_complete
+        assert n_minibatches_per_epoch > 0, \
+            f"Expected n_minibatches_per_epoch > 0. Got minibatch_size={minibatch_size}, perhaps misspecified?"
+        
+        schedule = lr_schedule_fn(n_minibatches_per_epoch, n_epochs)
+        
+        learning_rates = schedule(jnp.arange(n_minibatches_per_epoch*n_epochs))
+        learning_rates = learning_rates.reshape(n_epochs, n_minibatches_per_epoch)
+
+        # Minibatch scaling factor, for each sufficient statistic. See math notes.
+        scaling_factor = (batch_shape[0] * batch_shape[1] / minibatch_size**2,  # M / B_M * N / B_N
+                          batch_shape[1] / minibatch_size,                      # N / B_N
+                          batch_shape[0] / minibatch_size,                      # M / B_M
+                          batch_shape[0] * batch_shape[1] / minibatch_size**2,) # M / B_M * N / B_N
+
+        # Define EM step
+        def em_step(carry, these_inputs):
+            prev_params, prev_rolling_stats = carry
+            these_idxs, lr = these_inputs
+            
+            # Gather minibatched data
+            this_X, this_mask, these_prev_params, these_prev_rolling_stats \
+                    = self._get_minibatch(these_idxs, X, mask, prev_params, prev_rolling_stats)
+
+            # Compute expected sufficient statistics of minibatch
+            these_stats = self.minibatched_e_step(this_X, this_mask, these_prev_params)
+
+            # Incorporate expected stats from minibatch into rolling statistics
+            _update_fn = (
+                lambda rolling_stat, this_stat, scale:
+                (1-lr) * rolling_stat + lr * scale * this_stat
+            )
+            these_rolling_stats = tree_map(
+                _update_fn, these_prev_rolling_stats, these_stats, scaling_factor
+            )
+
+            # Maximize the posterior
+            G, this_Psi, this_Phi, Theta = self.m_step(*these_rolling_stats)
+
+            # Update the Psi and Phi of params and rolling stats at specified indices
+            Psi, Phi = prev_params[1], prev_params[2]
+            Psi = Psi.at[these_idxs[:,0],:].set(this_Psi)
+            Phi = Phi.at[these_idxs[:,1],:].set(this_Phi)
+            params = (G, Psi, Phi, Theta)
+
+            alpha_Psi, alpha_Phi = prev_rolling_stats[1], prev_rolling_stats[2]
+            alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta = these_rolling_stats
+            alpha_Psi = alpha_Psi.at[these_idxs[:,0],:].set(this_alpha_Psi)
+            alpha_Phi = alpha_Phi.at[these_idxs[:,1],:].set(this_alpha_Phi)
+            rolling_stats = (alpha_G, alpha_Psi, alpha_Phi, alpha_Theta)
+
+            # Calculate log-likelihood on full data
+            lp = self.log_prob(X, mask, params)
+
+            return (params, rolling_stats), lp
+
+        # Initialize parameters, rolling stats
+        params = init_params
+        rolling_stats = self._zero_rolling_stats(X, minibatch_size)
+        all_lps = []
+        for epoch in trange(n_epochs):
+            epoch_start_time = time.time()
+
+            batched_indices, remaining_indices = next(indices_iterator)
+            lrs = learning_rates[epoch]
+
+            # Scan through all complete minibatches
+            (params, rolling_stats), lps = lax.scan(
+                em_step, (params, rolling_stats), (batched_indices, lrs),
+            )
+
+            # Perform one final stochastic EM step over the incomplete minibatch
+            # Reuse last learning rate for simplicity; fine especiially if final
+            # minibatch is very incomplete.
+            if len(remaining_indices) > 0:
+                (params, rolling_stats), remaining_lp = em_step(
+                    (params, rolling_stats), (remaining_indices, lrs[-1])
+                )
+                lps = jnp.concatenate([lps, jnp.atleast_1d(remaining_lp)])
+
+            epoch_elapsed_time = time.time() - epoch_start_time
+
+            # Log metrics to WandB
+            if wnb is not None:
+                for i, (lp, lr) in enumerate(zip(lps, lrs)):
+                    wnb.log({'avg_lp': lp / mask.sum(),
+                             'learning_rate': lr,
+			     'epoch': epoch+(i+1)/n_minibatches_per_epoch},
+                             step=epoch*n_minibatches_per_epoch+i,
+                             commit=False)
+                
+                    wnb.log({'epoch_time [min]': epoch_elapsed_time/60,
+                           'epoch': epoch},
+                           step=(epoch+1)*n_minibatches_per_epoch-1,
+                           commit=True)
+                
+            # Check for NaNs, to more quickly identify failing!
+            if any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
+                raise ValueError(f"Expected params to be finite, but got\n{params}")
+            
+            all_lps.append(lps)
+
+        return params, jnp.array(all_lps)
