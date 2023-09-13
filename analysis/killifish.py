@@ -9,6 +9,7 @@ import numpy as onp
 import jax.numpy as jnp
 import jax.random as jr
 import optax
+from datetime import datetime
 
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
@@ -351,7 +352,7 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
 @click.option('--k3', type=int,)
 @click.option('--alpha', type=float, default=1.1,
               help='Concentration of Dirichlet prior.')
-@click.option('--seed',type=int, default=0,
+@click.option('--seed',type=int, default=None,
               help='Random seed for initialization.')
 @click.option('--train', 'train_frac', type=float, default=0.8,
               help='Fraction of .')
@@ -374,6 +375,10 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     
     print(f"Loading data from...{str(datadir)}")
     print(f"Saving results to...{str(outdir)}")
+
+    # If no seed provided, generate a random one based on the timestamp
+    if seed is None:
+        seed = int(datetime.now().timestamp())
 
     if use_wandb:
         wnb = wandb.init(
