@@ -1,0 +1,27 @@
+program: killifish.py
+project: kf-dtd
+command:
+  - ${interpreter}
+  - ${program}
+  - "${envvar:DATADIR}"
+  - "--outdir=${envvar:OUTDIR}"
+  - "--wandb"
+  - ${args}
+method: grid
+parameters:
+  method:
+    value: stochastic
+  max-samples:
+    value: -1
+  minibatch:
+    value: 19456
+  epoch:
+    value: 500
+  alpha:
+    value: 1.1
+  k1:
+    values: [5,10,20,30,40]
+  k2:
+    values: [5,10,20,30,40]
+  k3:
+    values: [5,10,20,30,40]
