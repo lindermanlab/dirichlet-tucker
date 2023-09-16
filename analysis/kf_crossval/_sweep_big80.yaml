@@ -1,5 +1,5 @@
 program: killifish.py
-project: kf-dtd
+project: kf-dtd-230726
 command:
   - ${interpreter}
   - ${program}
@@ -11,17 +11,17 @@ method: grid
 parameters:
   method:
     value: stochastic
-  max-samples:
+  max_samples:
     value: -1
-  minibatch:
-    value: 19456
+  minibatch_size:
+    value: 6000
   epoch:
-    value: 500
+    value: 250
   alpha:
     value: 1.1
   k1:
-    values: [5,10,20,30,40]
+    values: [30,40]
   k2:
-    values: [5,10,20,30,40]
+    values: [20]
   k3:
-    values: [5,10,20,30,40]
+    values: [30,40]

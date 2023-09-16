@@ -354,15 +354,15 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
               help='Concentration of Dirichlet prior.')
 @click.option('--seed',type=int, default=None,
               help='Random seed for initialization.')
-@click.option('--train', 'train_frac', type=float, default=0.8,
+@click.option('--train_frac', type=float, default=0.8,
               help='Fraction of .')
 @click.option('--method', type=str, default='full',
               help="'full' for full-batch em, 'stochastic' for stochastic em" )
 @click.option('--epoch', 'n_epochs', type=int, default=5000,
               help='# iterations of full-batch EM to run/# epochs of stochastic EM to run.')
-@click.option('--minibatch', 'minibatch_size', type=int, default=1024,
+@click.option('--minibatch_size', type=int, default=1024,
               help='# samples per minibatch, if METHOD=stochastic.')
-@click.option('--max-samples', type=int, default=-1,
+@click.option('--max_samples', type=int, default=-1,
               help='Maximum number of samples to load, performed by truncating first mode of dataset. Default: [-1], load all.')
 @click.option('--wandb', 'use_wandb', is_flag=True,
               help='Log run with WandB')
@@ -409,7 +409,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     print("Loading data...",end="")
     fpath_list = sorted([f for f in Path(datadir).rglob("*") if f.is_file()])
     data = load_data(fpath_list)
-
+    
     # Cast integer counts to float32 dtype
     X = jnp.asarray(data['X'], dtype=jnp.float32)[:max_samples]
     print("Done.")
