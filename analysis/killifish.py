@@ -273,7 +273,8 @@ def fit_full_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
     return params, lps
 
 def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
-              lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, wnb=None):
+              lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, drop_last=False,
+              wnb=None):
     """Fit 3D DTD model to data using stochastic fit algoirthm.
 
     (New) parameters
@@ -306,7 +307,8 @@ def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
         lr_schedule_fn = lr_schedule_fn if lr_schedule_fn is not None else DEFAULT_LR_SCHEDULE_FN
 
         params, lps = model.stochastic_fit(X, mask, init_params, n_epochs,
-                                           lr_schedule_fn, minibatch_size, key_fit, wnb=wnb)
+                                           lr_schedule_fn, minibatch_size, key_fit,
+                                           drop_last=drop_last, wnb=wnb)
     else:
         params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
     
@@ -364,13 +366,15 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
               help='# samples per minibatch, if METHOD=stochastic.')
 @click.option('--max_samples', type=int, default=-1,
               help='Maximum number of samples to load, performed by truncating first mode of dataset. Default: [-1], load all.')
+@click.option('--drop_last', is_flag=True,
+              help='Do not process incomplete minibatch when using stochasitc EM. Useful for OOM and speed issues.')
 @click.option('--wandb', 'use_wandb', is_flag=True,
               help='Log run with WandB')
 @click.option('--outdir', type=click.Path(file_okay=False, resolve_path=True, path_type=Path),
               default='./', help='Local directory to save results and wandb logs to.')
 def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
             method='full', minibatch_size=1024, n_epochs=5000, max_samples=-1,
-            use_wandb=False, outdir=None):
+            drop_last=False, use_wandb=False, outdir=None):
     """Fit data to one set of model parameters."""
     
     print(f"Loading data from...{str(datadir)}")
@@ -432,7 +436,7 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     # Fit the model
     params, lps = fit_model(
             method, key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha,
-            minibatch_size=minibatch_size, n_epochs=n_epochs, wnb=wnb)
+            minibatch_size=minibatch_size, n_epochs=n_epochs, drop_last=drop_last, wnb=wnb)
 
     # Evaluate the model on heldout samples
     test_ll, pct_dev = evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha)

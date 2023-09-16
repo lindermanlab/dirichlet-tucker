@@ -26,7 +26,8 @@ class ShuffleIndicesIterator():
 
         self.minibatch_size = minibatch_size
         self.n_complete = len(self._indices) // self.minibatch_size
-        self.has_incomplete = (len(self._indices) % self.minibatch_size) > 0
+        self.incomplete_size = len(self._indices) % self.minibatch_size
+        self.has_incomplete = self.incomplete_size > 0
 
     def __iter__(self):
         return self

@@ -286,7 +286,7 @@ class DirichletTuckerDecomp:
         return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
     
     def stochastic_fit(self, X, mask, init_params, n_epochs,
-                       lr_schedule_fn, minibatch_size, key, wnb=None):
+                       lr_schedule_fn, minibatch_size, key, drop_last=False, wnb=None):
         """Fit model parameters to data using stochastic expectation maximization.
         
         Parameters
@@ -299,6 +299,13 @@ class DirichletTuckerDecomp:
                 Number of data samples to fit on, sampled uniformly from the batch dimensions.
             key (PRNGKey):
                 PRNGKey to shuffle data loading order at each epoch
+            drop_last: bool
+                If False (default), process the last incomplete batch. This will
+                result in an additional "slot" of memory, since it has different
+                shape from the the main batch size. If running into OOM issues,
+                can set to True, in which the incomplete batch is skipped. NB:
+                it is up to the user to ensure that the skipped batch is relatively
+                small to not overly affect the infererred statistics.
             wnb (WandB instance, [optional]):
                 If WandB instance passed in, log average lps and learning rates
                 for every epoch.
@@ -312,7 +319,9 @@ class DirichletTuckerDecomp:
         # Instantiate an iterator that produces minibatches of indices into the data
         batch_shape = X.shape[:self.batch_ndims]
         indices_iterator = ShuffleIndicesIterator(key, batch_shape, minibatch_size)
-        
+        print(f'Running {indices_iterator.n_complete} minibatches of size {indices_iterator.minibatch_size}.')
+        print(f"Incomplete minibatch size of {indices_iterator.incomplete_size}. drop_last={drop_last},")
+
         # Define learning rate schedule and split in complete and incomplete lrs
         n_minibatches_per_epoch = indices_iterator.n_complete
         assert n_minibatches_per_epoch > 0, \
@@ -370,6 +379,10 @@ class DirichletTuckerDecomp:
 
             return (params, rolling_stats), lp
 
+        # Explicitly jit last em step
+        # TODO Have not confirmed expected behavior in reducing compile time
+        incomplete_em_step = jit(em_step)
+
         # Initialize parameters, rolling stats
         params = init_params
         rolling_stats = self._zero_rolling_stats(X, minibatch_size)
@@ -385,11 +398,11 @@ class DirichletTuckerDecomp:
                 em_step, (params, rolling_stats), (batched_indices, lrs),
             )
 
-            # Perform one final stochastic EM step over the incomplete minibatch
-            # Reuse last learning rate for simplicity; fine especiially if final
-            # minibatch is very incomplete.
-            if len(remaining_indices) > 0:
-                (params, rolling_stats), remaining_lp = em_step(
+            # If drop_last == False, perform one final stochastic EM step over
+            # the incomplete minibatch. Reuse last learning rate for simplicity;
+            # this is okay especially if incomplete minibatch has few samples.
+            if (not drop_last) and (len(remaining_indices) > 0):
+                (params, rolling_stats), remaining_lp = incomplete_em_step(
                     (params, rolling_stats), (remaining_indices, lrs[-1])
                 )
                 lps = jnp.concatenate([lps, jnp.atleast_1d(remaining_lp)])
