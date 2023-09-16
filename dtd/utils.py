@@ -1,6 +1,29 @@
 import jax.numpy as jnp
 import jax.random as jr
 
+def calculate_minibatch_size(d1,d2,d3,k1,k2,k3,mem_gb,mem_frac=1):
+    """Calculate minibatch size that maximizes available memory.
+    
+    Assumes 3D model with batch_dims (0,1).
+    """
+    m = (mem_gb*mem_frac) * (1024**3) / 4
+    #m -= (d1*d2*d3)
+    m /= (k1*k2*k3*d3)
+    return int(m)
+
+def calculate_memory(d1,d2,d3,k1,k2,k3,minibatch_size):
+    """Calculate memory needed for a given minibatch size.
+    
+    Assumes 3D model with batch_dims (0,1).
+
+    Note that this does NOT account for the memory needed to calculate the 
+    incomplete batch (if drop_last=False), which would use _additional_ memory.
+    """
+    mem_gb = k1*k2*k3*d3*minibatch_size
+    # m += d1*d2*d3
+    mem_gb *= 4 / (1024**3)
+    return mem_gb
+
 class ShuffleIndicesIterator():
     """Custom Iterator that produces minibatches of shuffled indices.
     
