@@ -237,41 +237,6 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def fit_full_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
-                   lr_schedule_fn=None, minibatch_size=1024, n_epochs=100,
-                   wnb=None):
-    """Fit 3D DTD model to data using stochastic fit algoirthm.
-
-    (New) parameters
-        lr_schedule_fn: Callable[[int, int], optax.Schedule]
-            Given `n_minibatches` and `n_epochs`, returns a function mapping step
-            counts to learning rate value.
-        minibatch_size: int
-            Number of samples per minibatch.
-        n_epochs: int
-            Number of full passes through the dataset to perform
-        wnb: wandb.Run or None
-            WandB Run instance for logging metrics per epoch
-    """
-
-    key_init, key_fit = jr.split(key)
-
-    # Construct a model
-    model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
-
-    # Randomly initialize parameters
-    print("Initializing model...", end="")
-    d1, d2, d3 = X.shape
-    init_params = model.sample_params(key_init, d1, d2, d3)
-    print("Done.")
-
-    # Fit model to data with EM
-    print("Fitting model...", end="")
-    params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
-    print("Done.")
-
-    return params, lps
-
 def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
               lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, drop_last=False,
               wnb=None):
