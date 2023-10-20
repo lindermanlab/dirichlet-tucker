@@ -73,6 +73,22 @@ class DirichletTuckerDecomp:
         return X
 
     # Now implement the EM algorithm
+    def _e_step_g(self, masked_X, probs, params):
+        r_g = params[0] * jnp.einsum('mnp,mi,nj,kp->ijk', masked_X/probs, *params[1:])
+        return r_g
+    
+    def _e_step_psi(self, masked_X, probs, params):
+        r_psi = jnp.einsum('ijk,mi,nj,kp->imnp', *params)
+        return (masked_X * (r_psi / probs)).sum(axis=(2,3)).T
+    
+    def _e_step_phi(self, masked_X, probs, params):
+        r_phi = jnp.einsum('ijk,mi,nj,kp->jmnp', *params)
+        return (masked_X * (r_phi / probs)).sum(axis=(1,3)).T
+    
+    def _e_step_theta(self, masked_X, probs, params):
+        r_theta = jnp.einsum('ijk,mi,nj,kp->kmnp', *params)
+        return (masked_X * (r_theta / probs)).sum(axis=(1,2))
+    
     def e_step(self, X, mask, params):
         """Compute posterior expected sufficient statistics of parameters.
         
@@ -81,15 +97,13 @@ class DirichletTuckerDecomp:
             which mice.
         """
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-        relative_probs = jnp.einsum('ijk,mi,nj,kp->ijkmnp', *params)
-        relative_probs /= probs
-        E_Z = X * mask[..., None] * relative_probs
+        masked_X = X * mask[..., None]
 
         # compute alpha_* given E[Z]
-        alpha_G = jnp.sum(E_Z, axis=(3,4,5))
-        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4,5)).T
-        alpha_Phi = jnp.sum(E_Z, axis=(0,2,3,5)).T
-        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3,4))
+        alpha_G = self._e_step_g(masked_X, probs, params)
+        alpha_Psi = self._e_step_psi(masked_X, probs, params)
+        alpha_Phi = self._e_step_phi(masked_X, probs, params)
+        alpha_Theta =  self._e_step_theta(masked_X, probs, params)
         return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
 
     def _m_step_g(self, alpha_G):
