@@ -25,7 +25,7 @@ import pandas as pd                                         # For making time-of
 
 from dtd.model3d import DirichletTuckerDecomp
 
-PROJECT_NAME = 'kf-dtd'
+PROJECT_NAME = 'kf-dtd-230726'
 DEFAULT_LR_SCHEDULE_FN = (
     lambda n_minibatches, n_epochs:
         optax.cosine_decay_schedule(

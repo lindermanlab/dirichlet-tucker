@@ -4,14 +4,21 @@
 #SBATCH --nodes=1 --ntasks=1
 #SBATCH --gpus=1
 #SBATCH --mem-per-gpu=5G
-#SBATCH --time=24:00:00
+#SBATCH --time=2:00:00
 #SBATCH --mail-type END
 #SBATCH --mail-type FAIL
 #SBATCH --output=/scratch/groups/swl1/killifish/tmp/kf-sweep-swl1-%A-%a.out
 #SBATCH --error=/scratch/groups/swl1/killifish/tmp/kf-sweep-swl1-%A-%a.out
-#SBATCH --array=[1-4]
+#SBATCH --array=[1-25]
 
-# noble-sun-288: 48 min to run 100 epochs at M=16384, on all data
+# Submits a job array.
+# swl1 hosts 4 A100s, with 80GB memory. We will use this to run this big models.
+# Initialize WandB.
+#   wandb sweep _sweep_big80.yaml
+# Note the sweep ID that is reported. The following step is manual:
+#   export SWEEP_ID=<sweep_id>
+# Now, you can submit the job
+#   sbatch kf_crossval/big80.sh
 
 echo SLURM_ARRAY_JOB_ID $SLURM_ARRAY_JOB_ID
 echo SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID
@@ -29,6 +36,6 @@ export OUTDIR=/scratch/groups/swl1/killifish/tmp
 
 export WANDB_DIR="$OUTDIR"
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
+# export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
 
-wandb agent --count 1 eyz/kf-dtd-230726/"$SWEEP_ID"
+wandb agent --count 5 eyz/kf-dtd-231022/"$SWEEP_ID"
