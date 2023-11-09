@@ -4,7 +4,7 @@
 #SBATCH --nodes=1 --ntasks=1
 #SBATCH --gpus=1
 #SBATCH --mem-per-gpu=5G
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 #SBATCH --mail-type END
 #SBATCH --mail-type FAIL
 #SBATCH --output=/scratch/groups/swl1/killifish/tmp/kf-sweep-swl1-%A-%a.out
@@ -38,4 +38,4 @@ export WANDB_DIR="$OUTDIR"
 
 # export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
 
-wandb agent --count 5 eyz/kf-dtd-231022/"$SWEEP_ID"
+wandb agent --count 14 eyz/kf-dtd-231022/"$SWEEP_ID"

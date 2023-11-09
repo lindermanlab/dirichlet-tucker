@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=1
 #SBATCH --gpus=1
 #SBATCH --mem-per-gpu=5G
-#SBATCH --time=24:00:00
+#SBATCH --time=00:30:00
 #SBATCH --mail-type END
 #SBATCH --mail-type FAIL
 #SBATCH --output=/scratch/groups/swl1/killifish/tmp/kf-one-%j.out
@@ -24,12 +24,12 @@ export DATADIR=/scratch/groups/swl1/killifish/p3_20230726-20230915/q2-aligned_10
 export OUTDIR=/scratch/groups/swl1/killifish/tmp
 export WANDB_DIR="$OUTDIR"
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.98
 
-# Must manually set project name in killifish.py script
+# Remember to MANUALLY set project name in top of killifish.py script
 python killifish.py \
-    "$DATADIR" --k1 40 --k2 20 --k3 30 --alpha 1.1 \
-    --epoch 250 --minibatch_size 16085 \
-    --method full --max_samples -1 \
+    "$DATADIR" --k1 50 --k2 4 --k3 100 --alpha 1.1 \
+    --epoch 2500 \
+    --method full \
     --outdir "$OUTDIR" \
     --drop_last --wandb
