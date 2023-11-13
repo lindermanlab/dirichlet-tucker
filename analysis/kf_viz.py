@@ -71,10 +71,10 @@ def draw_syllable_factors(params, autosort=True, ax=None):
         syllable_factors = syllable_factors[topic_perm,:]
     else:
         topic_perm = onp.arange(K)
-        
+
     # ------------------------------------------------------------------------
-    fig = plt.figure(figsize=(16, 4.5), dpi=96) if ax is None else ax.figure
     ax = plt.gca() if ax is None else ax
+
     im = ax.imshow(syllable_factors, interpolation='none', aspect='auto',
                    cmap='magma', norm=mplc.LogNorm(0.5/D, 1.0))
     set_syllable_cluster_ticks(ax)
@@ -85,7 +85,7 @@ def draw_syllable_factors(params, autosort=True, ax=None):
     ax.grid(visible=True, which='major', axis='y', alpha=0.8, lw=0.5)
     ax.set_ylabel('syllable factors / "behavioral topics"')
 
-    return fig, topic_perm
+    return topic_perm
 
 # ==============================================================================
 def make_tod_series(freq):
