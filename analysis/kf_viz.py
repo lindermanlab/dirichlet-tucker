@@ -104,14 +104,15 @@ def make_tod_series(freq):
 
     return pd.date_range('00:00:00', last_label, freq=freq).time
 
-def draw_circadian_bases(params, axs=None):
+def draw_circadian_bases(params, sort_by_time=True, axs=None):
     circadian_bases = params[2]
     D, K = circadian_bases.shape
 
     # Permute the circadian bases so that they are sorted by earliest peak
-    t_peak = onp.argmax(circadian_bases, axis=0)
-    basis_perm = onp.argsort(t_peak, kind='stable')
-    circadian_bases = circadian_bases[:, basis_perm]
+    if sort_by_time:
+        t_peak = onp.argmax(circadian_bases, axis=0)
+        basis_perm = onp.argsort(t_peak, kind='stable')
+        circadian_bases = circadian_bases[:, basis_perm]
 
     # Share a common a y-axis
     ymax = circadian_bases.max()
