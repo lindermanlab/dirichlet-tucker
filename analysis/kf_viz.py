@@ -57,18 +57,21 @@ def set_syllable_cluster_ticks(ax=None, axis='x', font_kws={'fontsize': 'small'}
     
     return ax
 
-def draw_syllable_factors(params, ax=None):
+def draw_syllable_factors(params, autosort=True, ax=None):
     # Permute syllables to match our KL-clustering for better interpretability
     syllable_factors = params[3][:,SYLLABLE_PERM]
     K, D = syllable_factors.shape
 
     # Use hiearchical clustering on syllable factor ("behavioral topic") axis
-    method = 'centroid'
-    metric = 'euclidean'
-    topic_perm = leaves_list(linkage(syllable_factors, method, metric)).astype(int)
+    if autosort:
+        method = 'centroid'
+        metric = 'euclidean'
+        topic_perm = leaves_list(linkage(syllable_factors, method, metric)).astype(int)
 
-    syllable_factors = syllable_factors[topic_perm,:]
-
+        syllable_factors = syllable_factors[topic_perm,:]
+    else:
+        topic_perm = onp.arange(K)
+        
     # ------------------------------------------------------------------------
     fig = plt.figure(figsize=(16, 4.5), dpi=96) if ax is None else ax.figure
     ax = plt.gca() if ax is None else ax
@@ -104,12 +107,12 @@ def make_tod_series(freq):
 
     return pd.date_range('00:00:00', last_label, freq=freq).time
 
-def draw_circadian_bases(params, sort_by_time=True, axs=None):
+def draw_circadian_bases(params, autosort=True, axs=None):
     circadian_bases = params[2]
     D, K = circadian_bases.shape
 
     # Permute the circadian bases so that they are sorted by earliest peak
-    if sort_by_time:
+    if autosort:
         t_peak = onp.argmax(circadian_bases, axis=0)
         basis_perm = onp.argsort(t_peak, kind='stable')
         circadian_bases = circadian_bases[:, basis_perm]
