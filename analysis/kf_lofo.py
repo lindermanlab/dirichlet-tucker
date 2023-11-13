@@ -9,9 +9,11 @@ TODO the lofi analysis should be folded in the `model[X]d.py` source code.
 from __future__ import annotations
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
+import tensorflow_probability.substrates.jax.distributions as tfd
 
 from dtd.model3d import DirichletTuckerDecomp
 from dtd.utils import get_wnb_project_df, download_wnb_params
@@ -103,7 +105,16 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def leave_one_in_heldout_loglikelihood(X, mask, model, params):
+def pseudo_heldout_log_likelihood(X, mask, model, params):
+    """Heldout log likelihood, except probs is explicitly normalized to sum to 1 along events dimensions (axis=-1).
+    
+    This is necessary because we are removing factors.
+    """
+    probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
+    probs / probs.sum(axis=-1, keepdims=True)
+    return jnp.where(~mask, tfd.Multinomial(model.C, probs=probs).log_prob(X), 0.0).sum()
+
+def leave_one_in_heldout_log_likelihood(X, mask, model, params):
     G, F1, F2, F3 = params
     K1, K2, K3 = G.shape
 
@@ -114,7 +125,7 @@ def leave_one_in_heldout_loglikelihood(X, mask, model, params):
         # F[:, k], shape(D1, 1)
         F1_ = lax.dynamic_index_in_dim(F1, k, axis=1, keepdims=True)
 
-        ll = model.heldout_log_likelihood(X, mask, (G_, F1_, F2, F3))
+        ll = pseudo_heldout_log_likelihood(X, mask, model, (G_, F1_, F2, F3))
 
         return None, ll
     
@@ -125,7 +136,7 @@ def leave_one_in_heldout_loglikelihood(X, mask, model, params):
         # F[:, k], shape(D2, 1)
         F2_ = lax.dynamic_index_in_dim(F2, k, axis=1, keepdims=True)
 
-        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2_, F3))
+        ll = pseudo_heldout_log_likelihood(X, mask, model, (G_, F1, F2_, F3))
 
         return None, ll
     
@@ -136,7 +147,7 @@ def leave_one_in_heldout_loglikelihood(X, mask, model, params):
         # F[:, k], shape(1, D3)
         F3_ = lax.dynamic_index_in_dim(F3, k, axis=0, keepdims=True)
 
-        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2, F3_))
+        ll = pseudo_heldout_log_likelihood(X, mask, model, (G_, F1, F2, F3_))
 
         return None, ll
     
@@ -162,7 +173,7 @@ def main(datadir, run_id, seed):
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
     # Leave one factor in!
-    lls_1, lls_2, lls_3 = leave_one_in_heldout_loglikelihood(X, mask, model, params)
+    lls_1, lls_2, lls_3 = leave_one_in_heldout_log_likelihood(X, mask, model, params)
     
     print(lls_1)
     print(lls_2)
