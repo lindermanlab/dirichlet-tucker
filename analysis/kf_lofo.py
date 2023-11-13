@@ -105,8 +105,7 @@ def make_random_mask(key, shape, train_frac=0.8):
 
 def leave_one_in_heldout_loglikelihood(X, mask, model, params):
     G, F1, F2, F3 = params
-    K1, K2 = F1.shape[-1], F2.shape[-1]
-    K3 = len(F3)
+    K1, K2, K3 = G.shape
 
     def f1_step(carry, k):
         # G[k,:,:], shape (1, K2, K3)
@@ -115,7 +114,7 @@ def leave_one_in_heldout_loglikelihood(X, mask, model, params):
         # F[:, k], shape(D1, 1)
         F1_ = lax.dynamic_index_in_dim(F1, k, axis=1, keepdims=True)
 
-        ll = model.heldout_loglikelihood(X, mask, (G_, F1_, F2, F3))
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1_, F2, F3))
 
         return None, ll
     
@@ -126,19 +125,18 @@ def leave_one_in_heldout_loglikelihood(X, mask, model, params):
         # F[:, k], shape(D2, 1)
         F2_ = lax.dynamic_index_in_dim(F2, k, axis=1, keepdims=True)
 
-        ll = model.heldout_loglikelihood(X, mask, (G_, F1, F2_, F3))
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2_, F3))
 
         return None, ll
     
     def f3_step(carry, k):
-        lax.dynamic_index_in_dim()
         # G[k,:,:], shape (K1, K2, 1)
         G_ = lax.dynamic_index_in_dim(G, k, axis=2, keepdims=True)
 
         # F[:, k], shape(1, D3)
         F3_ = lax.dynamic_index_in_dim(F3, k, axis=0, keepdims=True)
 
-        ll = model.heldout_loglikelihood(X, mask, (G_, F1, F2, F3_))
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2, F3_))
 
         return None, ll
     
