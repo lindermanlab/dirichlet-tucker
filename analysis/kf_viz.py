@@ -82,7 +82,7 @@ def draw_syllable_factors(params, ax=None):
     ax.grid(visible=True, which='major', axis='y', alpha=0.8, lw=0.5)
     ax.set_ylabel('syllable factors / "behavioral topics"')
 
-    return plt.gcf()
+    return fig, topic_perm
 
 # ==============================================================================
 def make_tod_series(freq):
