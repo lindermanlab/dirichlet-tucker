@@ -1,13 +1,17 @@
-"""Leave-one-factor-out analysis.
+"""Principal factors analysis -- leave-one-factor-in (lofi) approach.
 
+Identify the principle factors of analysis
 Evaluate held-out log likelihood to sort factors by importance.
+
+TODO the lofi analysis should be folded in the `model[X]d.py` source code.
 """
 
+from __future__ import annotations
 from pathlib import Path
 
 import jax.numpy as jnp
 import jax.random as jr
-import pandas as pd
+from jax import lax
 
 from dtd.model3d import DirichletTuckerDecomp
 from dtd.utils import get_wnb_project_df, download_wnb_params
@@ -99,56 +103,50 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def f1_loo(X, mask, model, params):
-    G = params[0]
-    F = params[1]
-    K = F.shape[-1]
+def leave_one_in_heldout_loglikelihood(X, mask, model, params):
+    G, F1, F2, F3 = params
+    K1, K2 = F1.shape[-1], F2.shape[-1]
+    K3 = len(F3)
+
+    def f1_step(carry, k):
+        # G[k,:,:], shape (1, K2, K3)
+        G_ = lax.dynamic_index_in_dim(G, k, axis=0, keepdims=True)
+
+        # F[:, k], shape(D1, 1)
+        F1_ = lax.dynamic_index_in_dim(F1, k, axis=1, keepdims=True)
+
+        ll = model.heldout_loglikelihood(X, mask, (G_, F1_, F2, F3))
+
+        return None, ll
     
-    lls = []
-    for k in range(K):
-        k_mask = (jnp.arange(K) == k)
+    def f2_step(carry, k):
+        # G[k,:,:], shape (K1, k, K3)
+        G_ = lax.dynamic_index_in_dim(G, k, axis=1, keepdims=True)
 
-        F_ = F[:,~k_mask]
-        G_ = G[~k_mask,:,:]
+        # F[:, k], shape(D2, 1)
+        F2_ = lax.dynamic_index_in_dim(F2, k, axis=1, keepdims=True)
 
-        ll = model.heldout_log_likelihood(X, mask, (G_, F_, params[2], params[3]))
-        lls.append(ll)
+        ll = model.heldout_loglikelihood(X, mask, (G_, F1, F2_, F3))
+
+        return None, ll
     
-    return jnp.array(lls)
+    def f3_step(carry, k):
+        lax.dynamic_index_in_dim()
+        # G[k,:,:], shape (K1, K2, 1)
+        G_ = lax.dynamic_index_in_dim(G, k, axis=2, keepdims=True)
 
-def f2_loo(X, mask, model, params):
-    G = params[0]
-    F = params[2]
-    K = F.shape[-1]
+        # F[:, k], shape(1, D3)
+        F3_ = lax.dynamic_index_in_dim(F3, k, axis=0, keepdims=True)
+
+        ll = model.heldout_loglikelihood(X, mask, (G_, F1, F2, F3_))
+
+        return None, ll
     
-    lls = []
-    for k in range(K):
-        k_mask = (jnp.arange(K) == k)
+    _, lls_1 = lax.scan(f1_step, None, jnp.arange(K1))
+    _, lls_2 = lax.scan(f2_step, None, jnp.arange(K2))
+    _, lls_3 = lax.scan(f3_step, None, jnp.arange(K3))
 
-        F_ = F[:,~k_mask]
-        G_ = G[:,~k_mask,:]
-
-        ll = model.heldout_log_likelihood(X, mask, (G_, params[1], F_, params[3]))
-        lls.append(ll)
-    
-    return jnp.array(lls)
-
-def f3_loo(X, mask, model, params):
-    G = params[0]
-    F = params[3]
-    K = F.shape[0]   # This is an event dimension! So things are switched.
-    
-    lls = []
-    for k in range(K):
-        k_mask = (jnp.arange(K) == k)
-
-        F_ = F[~k_mask,:]
-        G_ = G[:,:,~k_mask]
-
-        ll = model.heldout_log_likelihood(X, mask, (G_, params[1], params[2], F_))
-        lls.append(ll)
-    
-    return jnp.array(lls)
+    return lls_1, lls_2, lls_3
 
 def main(datadir, run_id, seed):
     key = jr.PRNGKey(seed)
@@ -165,16 +163,14 @@ def main(datadir, run_id, seed):
     # Instantiate model
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
-    # Leave one factor out!
-    lls_1 = f1_loo(X, mask, model, params)
-    lls_2 = f2_loo(X, mask, model, params)
-    lls_3 = f3_loo(X, mask, model, params)
+    # Leave one factor in!
+    lls_1, lls_2, lls_3 = leave_one_in_heldout_loglikelihood(X, mask, model, params)
     
     print(lls_1)
     print(lls_2)
     print(lls_3)
     
-    jnp.savez(params_dir/run_id/'lofo.npz',
+    jnp.savez(params_dir/run_id/'lofi.npz',
               F1=lls_1,
               F2=lls_2,
               F3=lls_3)
