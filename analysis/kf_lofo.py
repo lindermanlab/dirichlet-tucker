@@ -24,12 +24,12 @@ from kf_viz import draw_syllable_factors, draw_circadian_bases
 # --------------------------------------------------------------
 
 # Hardcode run information in for now
-# run_id = 'ig6dh2fo'
-# run_seed = 1698740237
+run_id = 'ig6dh2fo'
+run_seed = 1698740237
 
 # eternel-sweep 28
-run_id = '46grddu7'
-run_seed = 1698499854
+# run_id = '46grddu7'
+# run_seed = 1698499854
 
 # --------------------------------------------------------------
 # --------------------------------------------------------------
@@ -108,6 +108,64 @@ def load_data(datadir: Path, key: jr.PRNGKey, train_frac: float=0.8):
 def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
+
+
+def f1_loo(X, mask, model, params):
+    G = params[0]
+    F = params[1]
+    K = F.shape[-1]
+    
+    lls = []
+    for k in range(K):
+        k_mask = (jnp.arange(K) == k)
+
+        F_ = F[:,~k_mask]
+        G_ = G[~k_mask,:,:]
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, F_, params[2], params[3]))
+        lls.append(ll)
+    
+    return jnp.array(lls)
+
+def f2_loo(X, mask, model, params):
+    G = params[0]
+    F = params[2]
+    K = F.shape[-1]
+    
+    lls = []
+    for k in range(K):
+        k_mask = (jnp.arange(K) == k)
+
+        F_ = F[:,~k_mask]
+        G_ = G[:,~k_mask,:]
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, params[1], F_, params[3]))
+        lls.append(ll)
+    
+    return jnp.array(lls)
+
+def f3_loo(X, mask, model, params):
+    G = params[0]
+    F = params[3]
+    K = F.shape[0]   # This is an event dimension! So things are switched.
+    
+    lls = []
+    for k in range(K):
+        k_mask = (jnp.arange(K) == k)
+
+        F_ = F[~k_mask,:]
+        G_ = G[:,:,~k_mask]
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, params[1], params[2], F_))
+        lls.append(ll)
+    
+    return jnp.array(lls)
+
+def leave_one_out_for_loop(X, mask, model, params):
+    ll_1 = f1_loo(X, mask, model, params)
+    ll_2 = f2_loo(X, mask, model, params)
+    ll_3 = f3_loo(X, mask, model, params)
+    return ll_1, ll_2, ll_3
 
 def leave_one_out_heldout_log_likelihood(X, mask, model, params):
     """scan step involves taking all but the first index.
@@ -221,7 +279,8 @@ def main(datadir, run_id, seed):
 
     # Leave one factor in!
     # lls_1, lls_2, lls_3 = leave_one_in_heldout_log_likelihood(X, mask, model, params)
-    lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
+    # lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
+    lls_1, lls_2, lls_3 = leave_one_out_for_loop(X, mask, model, params)
     
     print(lls_1)
     print(lls_2)
