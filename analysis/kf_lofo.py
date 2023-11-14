@@ -24,8 +24,12 @@ from kf_viz import draw_syllable_factors, draw_circadian_bases
 # --------------------------------------------------------------
 
 # Hardcode run information in for now
-run_id = 'ig6dh2fo'
-run_seed = 1698740237
+# run_id = 'ig6dh2fo'
+# run_seed = 1698740237
+
+# eternel-sweep 28
+run_id = '46grddu7'
+run_seed = 1698499854
 
 # --------------------------------------------------------------
 # --------------------------------------------------------------
@@ -105,14 +109,57 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def pseudo_heldout_log_likelihood(X, mask, model, params):
-    """Heldout log likelihood, except probs is explicitly normalized to sum to 1 along events dimensions (axis=-1).
-    
-    This is necessary because we are removing factors.
+def leave_one_out_heldout_log_likelihood(X, mask, model, params):
+    """scan step involves taking all but the first index.
+    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
     """
-    probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
-    probs / probs.sum(axis=-1, keepdims=True)
-    return jnp.where(~mask, tfd.Multinomial(model.C, probs=probs).log_prob(X), 0.0).sum()
+    G, F1, F2, F3 = params
+    K1, K2, K3 = G.shape
+
+    def f1_step(carry, k):
+        rolled_G, rolled_F1 = carry
+        
+        # G[1:,:,:], shape (K1-1, K2, K3)
+        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K1-1, axis=0)
+
+        # F[:,1:], shape(D1, K1-1)
+        F1_ = lax.dynamic_slice_in_dim(rolled_F1, 1, K1-1, axis=1)
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1_, F2, F3))
+
+        return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F1, -1, axis=1)), ll
+    
+    def f2_step(carry, k):
+        rolled_G, rolled_F2 = carry
+        
+        # G[:,1:,:], shape (K1, K2-1, K3)
+        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K2-1, axis=1)
+
+        # F[:,1:], shape(D1, K2-1)
+        F2_ = lax.dynamic_slice_in_dim(rolled_F2, 1, K2-1, axis=1)
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2_, F3))
+
+        return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F2, -1, axis=1)), ll
+    
+    def f3_step(carry, k):
+        rolled_G, rolled_F3 = carry
+        
+        # G[:,:,1:], shape (K1, K2, K3-1)
+        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K3-1, axis=2)
+
+        # F[1:,:], shape(K3-1, D)
+        F3_ = lax.dynamic_slice_in_dim(rolled_F3, 1, K3-1, axis=0)
+
+        ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2, F3_))
+
+        return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F3, -1, axis=0)), ll
+    
+    _, lls_1 = lax.scan(f1_step, (G, F1), jnp.arange(K1))
+    _, lls_2 = lax.scan(f2_step, (G, F2), jnp.arange(K2))
+    _, lls_3 = lax.scan(f3_step, (G, F3), jnp.arange(K3))
+
+    return lls_1, lls_2, lls_3
 
 def leave_one_in_heldout_log_likelihood(X, mask, model, params):
     G, F1, F2, F3 = params
@@ -173,7 +220,8 @@ def main(datadir, run_id, seed):
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
     # Leave one factor in!
-    lls_1, lls_2, lls_3 = leave_one_in_heldout_log_likelihood(X, mask, model, params)
+    # lls_1, lls_2, lls_3 = leave_one_in_heldout_log_likelihood(X, mask, model, params)
+    lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
     
     print(lls_1)
     print(lls_2)
