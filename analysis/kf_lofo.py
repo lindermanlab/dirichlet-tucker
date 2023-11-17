@@ -109,6 +109,49 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
+def leave_one_out_heldout_log_likelihood_2(X, mask, model, params):
+    """scan step involves taking all but the first index.
+    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
+    """
+    
+    def make_f_step(g_axis, f_axis):
+        make_params = lambda G_, F_: (
+            G_,
+            lax.select(g_axis==0, F_, params[1]),
+            lax.select(g_axis==1, F_, params[2]),
+            lax.select(g_axis==2, F_, params[3]),
+        )
+
+        def f_step(carry, k):
+            rolled_G, rolled_F = carry
+            K = rolled_G.shape[g_axis]
+            
+            # G[1:,:,:], shape (K1-1, K2, K3)
+            G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
+
+            # F[:,1:], shape(D1, K1-1)
+            F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
+
+            # Compute held-out log likelihood
+            params_ = make_params(G_, F_)
+            ll = model.heldout_log_likelihood(X, mask, params_)
+
+            # Roll the carried core tensor and factor for the next iteration
+            rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
+            rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
+            return (rolled_G, rolled_F, params), ll
+        
+        return f_step
+
+    G, F1, F2, F3 = params
+    K1, K2, K3 = G.shape
+
+    _, lls_1 = lax.scan(make_f_step(0,1), (G, F1), jnp.arange(K1))
+    _, lls_2 = lax.scan(make_f_step(1,1), (G, F2), jnp.arange(K2))
+    _, lls_3 = lax.scan(make_f_step(2,0), (G, F3), jnp.arange(K3))
+    
+    return lls_1, lls_2, lls_3
+
 def leave_one_out_heldout_log_likelihood(X, mask, model, params):
     """scan step involves taking all but the first index.
     for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
@@ -204,11 +247,13 @@ def main(datadir, run_id, seed):
     # Leave one factor in!
     lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
     
+    kks_1, kks_2, kks_3 = leave_one_out_heldout_log_likelihood_2(X, mask, model, params)
     print(lls_1)
     print(lls_2)
     print(lls_3)
     
     print()
+    print(jnp.all(lls_1==kks_1), jnp.all(lls_1==kks_2), jnp.all(lls_1==kks_3),)
     jnp.savez(params_dir/run_id/'lofi.npz',
               F1=lls_1,
               F2=lls_2,
