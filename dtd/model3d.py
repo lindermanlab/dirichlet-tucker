@@ -167,6 +167,106 @@ class DirichletTuckerDecomp:
 
     def reconstruct(self, params):
         return self.C * jnp.einsum('ijk, mi, nj, kp->mnp', *params)
+    
+    def leave_one_out_log_likelihood(self, X, mask, params):
+        """Calculate heldout log likelihood when withholding one factor at a time."""
+        G, F1, F2, F3 = params
+        K1, K2, K3 = G.shape
+
+        def f1_step(carry, k):
+            g_axis, f_axis = 0, 1
+
+            rolled_G, rolled_F = carry
+            K = rolled_G.shape[g_axis]
+            
+            # G[1:,:,:], shape (K1-1, K2, K3)
+            G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
+
+            # F[:,1:], shape(D1, K1-1)
+            F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
+
+            # Compute held-out log likelihood
+            params_ = (G_, F_, F2, F3)
+            ll = self.heldout_log_likelihood(X, mask, params_)
+
+            # Roll the carried core tensor and factor for the next iteration
+            rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
+            rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
+            return (rolled_G, rolled_F), ll
+        
+        def f2_step(carry, k):
+            g_axis, f_axis = 1, 1
+
+            rolled_G, rolled_F = carry
+            K = rolled_G.shape[g_axis]
+            
+            # G[:,1:,:], shape (K1, K2-1, K3)
+            G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
+
+            # F[:,1:], shape(D1, K1-1)
+            F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
+
+            # Compute held-out log likelihood
+            params_ = (G_, F1, F_, F3)
+            ll = self.heldout_log_likelihood(X, mask, params_)
+
+            # Roll the carried core tensor and factor for the next iteration
+            rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
+            rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
+            return (rolled_G, rolled_F), ll
+        
+        def f3_step(carry, k):
+            g_axis, f_axis = 2, 0
+
+            rolled_G, rolled_F = carry
+            K = rolled_G.shape[g_axis]
+            
+            # G[:,1:,:], shape (K1, K2, K3-1)
+            G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
+
+            # F[1:], shape(K3-1, D3)
+            F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
+
+            # Compute held-out log likelihood
+            params_ = (G_, F1, F2, F_)
+            ll = self.heldout_log_likelihood(X, mask, params_)
+
+            # Roll the carried core tensor and factor for the next iteration
+            rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
+            rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
+            return (rolled_G, rolled_F), ll
+            
+        _, lls_1 = lax.scan(f1_step, (G, F1), jnp.arange(K1))
+        _, lls_2 = lax.scan(f2_step, (G, F2), jnp.arange(K2))
+        _, lls_3 = lax.scan(f3_step, (G, F3), jnp.arange(K3))
+        
+        return lls_1, lls_2, lls_3
+    
+    def sort_params(self, X, mask, params):
+        """Sort params by held-out log-likelihood explained.
+        
+        Returns sorted parameters are their log likelihoods
+        """
+        lls_1, lls_2, lls_3 = self.leave_one_out_log_likelihood(X, mask, params)
+
+        # Withheld factor with greatest contribution will have the lowest LOFO
+        # log likelihood. So, use argsort ordering exactly as is
+        i1_sorted = jnp.argsort(lls_1)
+        i2_sorted = jnp.argsort(lls_2)
+        i3_sorted = jnp.argsort(lls_3)
+
+        # Sort factors and core tensor
+        G, F1, F2, F3 = params
+        F1 = F1[:, i1_sorted]
+        F2 = F2[:, i2_sorted]
+        F3 = F3[i3_sorted, :,]
+
+        # Sort core tensor axis-by-axis
+        G = G[i1_sorted,:,:]
+        G = G[:,i2_sorted,:]
+        G = G[:,:,i3_sorted]
+
+        return (G, F1, F2, F3), (lls_1[i1_sorted], lls_2[i2_sorted], lls_3[i3_sorted])
 
     # Fit the model!
     def fit(self, X, mask, init_params, num_iters, wnb=None):

@@ -109,124 +109,6 @@ def make_random_mask(key, shape, train_frac=0.8):
     """Make binary mask to split data into train (1) and test (0) sets."""
     return jr.bernoulli(key, train_frac, shape)
 
-def leave_one_out_heldout_log_likelihood_2(X, mask, model, params):
-    """scan step involves taking all but the first index.
-    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
-    """
-    
-    def make_f_step(g_axis, f_axis, make_params):
-        def f_step(carry, k):
-            rolled_G, rolled_F = carry
-            K = rolled_G.shape[g_axis]
-            
-            # G[1:,:,:], shape (K1-1, K2, K3)
-            G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
-
-            # F[:,1:], shape(D1, K1-1)
-            F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
-
-            # Compute held-out log likelihood
-            params_ = make_params(G_, F_)
-            ll = model.heldout_log_likelihood(X, mask, params_)
-
-            # Roll the carried core tensor and factor for the next iteration
-            rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
-            rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
-            return (rolled_G, rolled_F, params), ll
-        
-        return f_step
-
-    G, F1, F2, F3 = params
-    K1, K2, K3 = G.shape
-
-    make_params_1 = lambda G_, F_: (G_, F_, F2, F3)
-    _, lls_1 = lax.scan(make_f_step(0,1,make_params_1), (G, F1), jnp.arange(K1))
-
-    make_params_2 = lambda G_, F_: (G_, F1, F_, F3)
-    _, lls_2 = lax.scan(make_f_step(1,1,make_params_2), (G, F2), jnp.arange(K2))
-
-    make_params_3 = lambda G_, F_: (G_, F1, F2, F_)
-    _, lls_3 = lax.scan(make_f_step(2,0,make_params_3), (G, F3), jnp.arange(K3))
-    
-    return lls_1, lls_2, lls_3
-
-def leave_one_out_heldout_log_likelihood(X, mask, model, params):
-    """scan step involves taking all but the first index.
-    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
-    """
-    
-    G, F1, F2, F3 = params
-    K1, K2, K3 = G.shape
-
-    def f1_step(carry, k):
-        g_axis, f_axis = 0, 1
-
-        rolled_G, rolled_F = carry
-        K = rolled_G.shape[g_axis]
-        
-        # G[1:,:,:], shape (K1-1, K2, K3)
-        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
-
-        # F[:,1:], shape(D1, K1-1)
-        F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
-
-        # Compute held-out log likelihood
-        params_ = (G_, F_, F2, F3)
-        ll = model.heldout_log_likelihood(X, mask, params_)
-
-        # Roll the carried core tensor and factor for the next iteration
-        rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
-        rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
-        return (rolled_G, rolled_F), ll
-    
-    def f2_step(carry, k):
-        g_axis, f_axis = 1, 1
-
-        rolled_G, rolled_F = carry
-        K = rolled_G.shape[g_axis]
-        
-        # G[1:,:,:], shape (K1-1, K2, K3)
-        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
-
-        # F[:,1:], shape(D1, K1-1)
-        F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
-
-        # Compute held-out log likelihood
-        params_ = (G_, F1, F_, F3)
-        ll = model.heldout_log_likelihood(X, mask, params_)
-
-        # Roll the carried core tensor and factor for the next iteration
-        rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
-        rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
-        return (rolled_G, rolled_F), ll
-    
-    def f3_step(carry, k):
-        g_axis, f_axis = 2, 0
-
-        rolled_G, rolled_F = carry
-        K = rolled_G.shape[g_axis]
-        
-        # G[:,1:,:], shape (K1, K2, K3-1)
-        G_ = lax.dynamic_slice_in_dim(rolled_G, 1, K-1, axis=g_axis)
-
-        # F[1:], shape(K3-1, D3)
-        F_ = lax.dynamic_slice_in_dim(rolled_F, 1, K-1, axis=f_axis)
-
-        # Compute held-out log likelihood
-        params_ = (G_, F1, F2, F_)
-        ll = model.heldout_log_likelihood(X, mask, params_)
-
-        # Roll the carried core tensor and factor for the next iteration
-        rolled_G = jnp.roll(rolled_G, -1, axis=g_axis)
-        rolled_F = jnp.roll(rolled_F, -1, axis=f_axis)
-        return (rolled_G, rolled_F), ll
-    
-    _, lls_1 = lax.scan(f1_step, (G, F1), jnp.arange(K1))
-    _, lls_2 = lax.scan(f2_step, (G, F2), jnp.arange(K2))
-    _, lls_3 = lax.scan(f3_step, (G, F3), jnp.arange(K3))
-    
-    return lls_1, lls_2, lls_3
-
 def main(datadir, run_id, seed):
     key = jr.PRNGKey(seed)
     key_mask, _ = jr.split(key)
@@ -243,19 +125,16 @@ def main(datadir, run_id, seed):
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
     # Leave one factor in!
-    lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
+    sorted_params, lls = model.sort_params(X, mask, params)
     
-    kks_1, kks_2, kks_3 = leave_one_out_heldout_log_likelihood_2(X, mask, model, params)
-    print(lls_1)
-    print(lls_2)
-    print(lls_3)
+    print(lls[1-1])
+    print(lls[2-1])
+    print(lls[3-1])
     
-    print()
-    print(jnp.all(lls_1==kks_1), jnp.all(lls_1==kks_2), jnp.all(lls_1==kks_3),)
-    jnp.savez(params_dir/run_id/'lofi.npz',
-              F1=lls_1,
-              F2=lls_2,
-              F3=lls_3)
+    # jnp.savez(params_dir/run_id/'lofi.npz',
+    #           F1=lls_1,
+    #           F2=lls_2,
+    #           F3=lls_3)
     return
   
 main(data_dir, run_id, run_seed)
