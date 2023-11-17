@@ -167,10 +167,7 @@ def leave_one_out_for_loop(X, mask, model, params):
     ll_3 = f3_loo(X, mask, model, params)
     return ll_1, ll_2, ll_3
 
-def leave_one_out_heldout_log_likelihood(X, mask, model, params):
-    """scan step involves taking all but the first index.
-    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
-    """
+def ff1_loo(X, mask, model, params):
     G, F1, F2, F3 = params
     K1, K2, K3 = G.shape
 
@@ -187,6 +184,14 @@ def leave_one_out_heldout_log_likelihood(X, mask, model, params):
 
         return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F1, -1, axis=1)), ll
     
+    _, lls = lax.scan(f1_step, (G, F1), jnp.arange(K1))
+    
+    return lls
+
+def ff2_loo(X, mask, model, params):
+    G, F1, F2, F3 = params
+    K1, K2, K3 = G.shape
+
     def f2_step(carry, k):
         rolled_G, rolled_F2 = carry
         
@@ -198,7 +203,15 @@ def leave_one_out_heldout_log_likelihood(X, mask, model, params):
 
         ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2_, F3))
 
-        return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F2, -1, axis=1)), ll
+        return (jnp.roll(rolled_G, -1, axis=1), jnp.roll(rolled_F2, -1, axis=1)), ll
+    
+    _, lls = lax.scan(f2_step, (G, F2), jnp.arange(K2))
+    
+    return lls
+
+def ff3_loo(X, mask, model, params):
+    G, F1, F2, F3 = params
+    K1, K2, K3 = G.shape
     
     def f3_step(carry, k):
         rolled_G, rolled_F3 = carry
@@ -211,12 +224,21 @@ def leave_one_out_heldout_log_likelihood(X, mask, model, params):
 
         ll = model.heldout_log_likelihood(X, mask, (G_, F1, F2, F3_))
 
-        return (jnp.roll(rolled_G, -1, axis=0), jnp.roll(rolled_F3, -1, axis=0)), ll
+        return (jnp.roll(rolled_G, -1, axis=2), jnp.roll(rolled_F3, -1, axis=0)), ll
     
-    _, lls_1 = lax.scan(f1_step, (G, F1), jnp.arange(K1))
-    _, lls_2 = lax.scan(f2_step, (G, F2), jnp.arange(K2))
-    _, lls_3 = lax.scan(f3_step, (G, F3), jnp.arange(K3))
+    _, lls = lax.scan(f3_step, (G, F3), jnp.arange(K3))
+    
+    return lls
 
+def leave_one_out_heldout_log_likelihood(X, mask, model, params):
+    """scan step involves taking all but the first index.
+    for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
+    """
+    
+    lls_1 = ff1_loo(X, mask, model, params)
+    lls_2 = ff2_loo(X, mask, model, params)
+    lls_3 = ff3_loo(X, mask, model, params)
+    
     return lls_1, lls_2, lls_3
 
 def leave_one_in_heldout_log_likelihood(X, mask, model, params):
@@ -278,14 +300,22 @@ def main(datadir, run_id, seed):
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
     # Leave one factor in!
-    # lls_1, lls_2, lls_3 = leave_one_in_heldout_log_likelihood(X, mask, model, params)
-    # lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
-    lls_1, lls_2, lls_3 = leave_one_out_for_loop(X, mask, model, params)
+    lls_1, lls_2, lls_3 = leave_one_out_heldout_log_likelihood(X, mask, model, params)
+    lls_1_, lls_2_, lls_3_ = leave_one_out_for_loop(X, mask, model, params)
     
     print(lls_1)
     print(lls_2)
     print(lls_3)
     
+    print()
+    print(lls_1_)
+    print(lls_2_)
+    print(lls_3_)
+    
+    print()
+    print(jnp.allclose(lls_1_, lls_1, atol=1e8), jnp.allclose(lls_2_, lls_2, atol=1e8), jnp.allclose(lls_3_, lls_3, atol=1e8))
+
+    print()
     jnp.savez(params_dir/run_id/'lofi.npz',
               F1=lls_1,
               F2=lls_2,
