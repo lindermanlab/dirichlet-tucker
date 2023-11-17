@@ -114,14 +114,7 @@ def leave_one_out_heldout_log_likelihood_2(X, mask, model, params):
     for the carry, the parameter and core tensor are then rolled so that the next iteration, there will be a new index that is not taken
     """
     
-    def make_f_step(g_axis, f_axis):
-        make_params = lambda G_, F_: (
-            G_,
-            lax.select(g_axis==0, F_, params[1]),
-            lax.select(g_axis==1, F_, params[2]),
-            lax.select(g_axis==2, F_, params[3]),
-        )
-
+    def make_f_step(g_axis, f_axis, make_params):
         def f_step(carry, k):
             rolled_G, rolled_F = carry
             K = rolled_G.shape[g_axis]
@@ -146,9 +139,14 @@ def leave_one_out_heldout_log_likelihood_2(X, mask, model, params):
     G, F1, F2, F3 = params
     K1, K2, K3 = G.shape
 
-    _, lls_1 = lax.scan(make_f_step(0,1), (G, F1), jnp.arange(K1))
-    _, lls_2 = lax.scan(make_f_step(1,1), (G, F2), jnp.arange(K2))
-    _, lls_3 = lax.scan(make_f_step(2,0), (G, F3), jnp.arange(K3))
+    make_params_1 = lambda G_, F_: (G_, F_, F2, F3)
+    _, lls_1 = lax.scan(make_f_step(0,1,make_params_1), (G, F1), jnp.arange(K1))
+
+    make_params_2 = lambda G_, F_: (G_, F1, F_, F3)
+    _, lls_2 = lax.scan(make_f_step(1,1,make_params_2), (G, F2), jnp.arange(K2))
+
+    make_params_3 = lambda G_, F_: (G_, F1, F2, F_)
+    _, lls_3 = lax.scan(make_f_step(2,0,make_params_3), (G, F3), jnp.arange(K3))
     
     return lls_1, lls_2, lls_3
 
