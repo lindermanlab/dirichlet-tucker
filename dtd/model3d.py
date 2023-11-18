@@ -146,7 +146,6 @@ class DirichletTuckerDecomp:
         return G, Psi, Phi, Theta
 
     def heldout_log_likelihood(self, X, mask, params):
-        # TODO: Compute the log likelihood of the held-out entries in X
         probs = jnp.einsum('ijk,mi,nj,kp->mnp', *params)
         return jnp.where(~mask, tfd.Multinomial(self.C, probs=probs).log_prob(X), 0.0).sum()
 
