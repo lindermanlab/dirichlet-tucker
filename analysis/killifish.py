@@ -91,22 +91,21 @@ def load_data(data_dir: Path,
             names.append([fpath.stem[3:],]*len(ages[-1]))
     
     X = jnp.concatenate(X, axis=0)[:max_samples]
-    ages = jnp.concatenate(ages)[:max_samples]
-    names = jnp.concatenate(names)[:max_samples]
+    ages = onp.concatenate(ages)[:max_samples]
+    names = onp.concatenate(names)[:max_samples]
     print("Done.")
 
     # Create a random mask along batch dimensions (non-normalized dimensions)
     batch_shape = tuple([X.shape[i] for i in batch_axes])
     mask = (make_random_mask(key, batch_shape, train_frac)
-            if isinstance(key, jr.PRNGKey)
-            else jnp.ones(batch_shape, dtype=int))
+            if key is not None else jnp.ones(batch_shape, dtype=int))
     
     # Get total counts. Event axes are, by dimension, the axes along which
     # the data tensor X sums to a constant number.
     total_counts = X.sum(axis=event_axes)
-    assert jnp.all(total_counts==(total_counts.reshape[-1])[0]), \
+    assert jnp.all(total_counts==total_counts.reshape(-1)[0]), \
         f'Expected data tensor to have a normalized number of counts along the event dimensions {event_axes}.'
-    total_counts = int((total_counts.reshape[-1])[0])
+    total_counts = int(total_counts.reshape(-1)[0])
 
     return total_counts, X, mask, ages, names
 
