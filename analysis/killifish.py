@@ -85,10 +85,10 @@ def load_data(data_dir: Path,
     for fpath in fpath_list:
         fpath = Path(fpath)
 
-        names.append(fpath.stem[3:])
         with jnp.load(fpath) as f:
             X.append(f['counts'])
             ages.append(f['session_ids'])
+            names.append([fpath.stem[3:],]*len(ages[-1]))
     
     X = jnp.concatenate(X, axis=0)[:max_samples]
     ages = jnp.concatenate(ages)[:max_samples]
