@@ -31,8 +31,7 @@ def calculate_minibatch_size(d1,d2,d3,k1,k2,k3,mem_gb,mem_frac=0.75):
         px.line(x=mod_m, y=mod_val)
     """
     m = (mem_gb*mem_frac) * (1024**3) / 4
-    #m -= (d1*d2*d3)
-    m /= (k1*k2*k3*d3)
+    m /= jnp.max(jnp.array([k1,k2,k3])) * d3
     return int(m)
 
 def calculate_memory(d1,d2,d3,k1,k2,k3,minibatch_size):
@@ -43,7 +42,7 @@ def calculate_memory(d1,d2,d3,k1,k2,k3,minibatch_size):
     Note that this does NOT account for the memory needed to calculate the 
     incomplete batch (if drop_last=False), which would use _additional_ memory.
     """
-    mem_gb = k1*k2*k3*d3*minibatch_size
+    mem_gb = jnp.max(jnp.array([k1,k2,k3])) * d3 * minibatch_size
     # m += d1*d2*d3
     mem_gb *= 4 / (1024**3)
     return mem_gb
