@@ -91,8 +91,8 @@ def load_data(data_dir: Path,
             ages.append(f['session_ids'])
     
     X = jnp.concatenate(X, axis=0)[:max_samples]
-    ages = jnp.array(ages)[:max_samples]
-    names = jnp.array(names)[:max_samples]
+    ages = jnp.concatenate(ages)[:max_samples]
+    names = jnp.concatenate(names)[:max_samples]
     print("Done.")
 
     # Create a random mask along batch dimensions (non-normalized dimensions)
