@@ -149,17 +149,14 @@ def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
                                            drop_last=drop_last, wnb=wnb)
     else:
         params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
-    
+
     print("Done.")
 
-    return params, lps
+    return model, params, lps
 
-def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
+def evaluate_fit(model, X, mask, params, ):
     """Compute heldout log likelihood and percent deviation from saturated model."""
 
-    # Reonstruct a model 
-    model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
-    
     # Compute test log likelihood
     print("Evaluating fit...", end="")
     test_ll = model.heldout_log_likelihood(X, mask, params)
@@ -169,13 +166,13 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
     baseline_probs = jnp.mean(X[mask], axis=0)
     baseline_probs /= baseline_probs.sum(axis=-1, keepdims=True)
     baseline_test_ll = \
-        tfd.Multinomial(total_counts, probs=baseline_probs).log_prob(X[~mask]).sum()
+        tfd.Multinomial(model.C, probs=baseline_probs).log_prob(X[~mask]).sum()
 
     # Compute test ll under under saturated model (true empirical syllable usage)
     # - saturated_probs = X / total_counts: (D1, D2, D3)
     saturated_probs = X / X.sum(axis=-1, keepdims=True)
     saturated_test_ll = \
-        jnp.where(~mask, tfd.Multinomial(total_counts, probs=saturated_probs).log_prob(X), 0.0).sum()
+        jnp.where(~mask, tfd.Multinomial(model.C, probs=saturated_probs).log_prob(X), 0.0).sum()
 
     # Compute test log likelihood percent deviation of fitted model from
     # saturated model (upper bound), relative to baseline (lower bound).
@@ -183,7 +180,7 @@ def evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha):
     pct_dev *= 100
     print("Done.")
 
-    return test_ll, pct_dev
+    return pct_dev, test_ll, baseline_test_ll, saturated_test_ll
 
 @click.command()
 @click.argument('datadir', type=click.Path(exists=True, file_okay=False, path_type=Path))
@@ -237,8 +234,14 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
             }
         )
         wandb.define_metric('avg_lp', summary='min')
+        
+        # Create a subdirectory at outdir based on run_id hash
+        run_id = wandb.run.id
+        outdir = outdir/run_id
+        outdir.mkdir(parents=True)
     else:
         wnb = None
+        run_id = None
     
     # ==========================================================================
 
@@ -247,45 +250,63 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     key = jr.PRNGKey(seed)
     key_mask, key_fit = jr.split(key)
 
-    total_counts, X, mask, _, _ = load_data(datadir,
-                                            max_samples=max_samples,
-                                            train_frac=train_frac,
-                                            key=key_mask)
+    total_counts, X, mask, _, _ \
+        = load_data(datadir, max_samples=max_samples, train_frac=train_frac, key=key_mask)
+    
     # Convert UInt data tensor to float32 dtype
     X = jnp.asarray(X, dtype=jnp.float32)
     print(f"\tData array: shape {X.shape}, {X.nbytes/(1024**3):.1f}GB")
 
     # Fit the model
-    params, lps = fit_model(
+    model, params, lps = fit_model(
             method, key_fit, X, mask, total_counts, k1, k2, k3, alpha=alpha,
-            minibatch_size=minibatch_size, n_epochs=n_epochs, drop_last=drop_last, wnb=wnb)
+            minibatch_size=minibatch_size, n_epochs=n_epochs, drop_last=drop_last,
+            wnb=wnb)
 
     # Evaluate the model on heldout samples
-    test_ll, pct_dev = evaluate_fit(params, X, mask, total_counts, k1, k2, k3, alpha)
+    pct_dev, test_ll, baseline_test_ll, saturated_test_ll \
+                                        = evaluate_fit(model, X, mask, params)
+    
+    # Sort the model by principal factors of variation
+    params, lofo_test_lls = model.sort_params(X, mask, params)
 
     run_elapsed_time = time.time() - run_start_time
-
-    # Visualize parameters
-    fig_topics = draw_syllable_factors(params)
-    fig_bases = draw_circadian_bases(params)
 
     # ==========================================================================
     
     # Save results locally
     fpath_params = outdir/'params.npz'
-    onp.savez_compressed(fpath_params, G=params[0], F1=params[1], F2=params[2], F3=params[3])
+    n_train = mask.sum()
+    n_test = (~mask).sum()
+    onp.savez_compressed(fpath_params,
+                         G=params[0],
+                         F1=params[1],
+                         F2=params[2],
+                         F3=params[3],
+                         seed=seed,
+                         avg_train_lps=lps/n_train,
+                         avg_test_ll=test_ll/n_test,
+                         avg_baseline_test_ll=baseline_test_ll/n_test,
+                         avg_saturated_test_ll=saturated_test_ll/n_test,
+                         avg_lofo_test_ll_1=lofo_test_lls[0]/n_test,
+                         avg_lofo_test_ll_2=lofo_test_lls[1]/n_test,
+                         avg_lofo_test_ll_3=lofo_test_lls[2]/n_test,
+                         run_id=run_id,
+                         )
     
-    plt.figure(fig_topics)
+    # Visualize parameters and save them
+    fig_topics = plt.figure(figsize=(16, 4.5), dpi=96)
+    draw_syllable_factors(params, ax=plt.gca())
     fpath_topics = get_unique_path(outdir/'behavioral-topics.png')
     plt.savefig(fpath_topics, bbox_inches='tight')
     plt.close()
 
-    plt.figure(fig_bases)
+    fig_bases = draw_circadian_bases(params)
     fpath_bases = get_unique_path(outdir/'circadian-bases.png')
     plt.savefig(fpath_bases, bbox_inches='tight')
     plt.close()
 
-    # Log summry metrics. lps are logged by model.stochastic_fit
+    # Log summry metrics. lps are automatically logged by model.stochastic_fit
     if use_wandb:
         wnb.summary["pct_dev"] = pct_dev
         wnb.summary["avg_test_ll"] = test_ll / (~mask).sum()
