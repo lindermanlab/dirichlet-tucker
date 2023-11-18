@@ -3,7 +3,8 @@
 Identify the principle factors of analysis
 Evaluate held-out log likelihood to sort factors by importance.
 
-TODO the lofi analysis should be folded in the `model[X]d.py` source code.
+This script uses functions from the main `killifish.py` script to ensure
+consistency of how data is loaded and masked.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import tensorflow_probability.substrates.jax.distributions as tfd
 from dtd.model3d import DirichletTuckerDecomp
 from dtd.utils import get_wnb_project_df, download_wnb_params
 
+from killifish import load_data
 from kf_viz import draw_syllable_factors, draw_circadian_bases
 
 
@@ -40,74 +42,6 @@ params_dir =  Path('/scratch/groups/swl1/killifish/p3_20230726-20230915/kf-dtd-2
 data_dir = Path('/scratch/groups/swl1/killifish/p3_20230726-20230915/q2-aligned_10min')
           
 # --------------------------------------------------------------
-
-def _get_subshape(X, axes: tuple=(0,)):
-    """Return shape of X along specified axes."""
-    return tuple([X.shape[i] for i in axes])
-
-def _load_data(fpath_list: list[str]):
-    """Load data and metadata, and concatenate it along axis=0.
-    
-    Parameters
-        fpath_list: list of file paths to load
-
-    Returns
-        data: uint tensor of syllable data per timebin
-        ages: list of recording ages, by subject
-        names: list of subject names
-    """
-
-    counts, ages, names = [], [], []
-    for fpath in fpath_list:
-        fpath = Path(fpath)
-
-        names.append(fpath.stem[3:])
-        with jnp.load(fpath) as f:
-            counts.append(f['counts'])
-            ages.append(f['session_ids'])
-        
-    return {
-        'X': jnp.concatenate(counts, axis=0),
-        'batch_axes': (0,1),
-        'ages': ages, 
-        'names': names
-    }
-
-def load_data(datadir: Path, key: jr.PRNGKey, train_frac: float=0.8):
-    """Return data array and total counts."""
-    
-    # This variable is left over from debugging the killifish.py code.
-    # However, keeping and hardcoding the default value for patter recognition
-    max_samples = -1
-    
-    # Load data from input directory. Search in all subdirectories
-    print("Loading data...",end="")
-    fpath_list = sorted([f for f in Path(datadir).rglob("*") if f.is_file()])
-    data = _load_data(fpath_list)
-    
-    # Cast integer counts to float32 dtype
-    X = jnp.asarray(data['X'], dtype=jnp.float32)[:max_samples]
-    print("Done.")
-    print(f"\tData array: shape {X.shape}, {X.nbytes/(1024**3):.1f}GB")
-
-    # Create random mask to hold-out data for validation
-    batch_shape = _get_subshape(X, data['batch_axes'])
-    mask = make_random_mask(key, batch_shape, train_frac)
-
-    # Get total counts. Since any random batch indices should give the same number
-    # counts, i.e. if X has batch_axes of (0,1), then X[i,j].sum() = C for all i,j,
-    # and since we assume that the batch axes are the leading dimensions, we can
-    # calculate the total counts  of data by abusing data['batch_axes'] as indices
-    total_counts = float(X[data['batch_axes']].sum())
-    assert total_counts.is_integer(), \
-        f'Expected `total_counts` to be integer values, but got {total_counts}'
-    total_counts = int(total_counts)
-    
-    return X, total_counts, mask
-    
-def make_random_mask(key, shape, train_frac=0.8):
-    """Make binary mask to split data into train (1) and test (0) sets."""
-    return jr.bernoulli(key, train_frac, shape)
 
 def main(datadir, run_id, seed):
     key = jr.PRNGKey(seed)

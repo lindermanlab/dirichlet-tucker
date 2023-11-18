@@ -1,27 +1,21 @@
 from __future__ import annotations
+from typing import Optional
 
+import wandb
 import click
 from pathlib import Path
+from datetime import datetime
+import time
 
-from collections import OrderedDict
-import itertools
 import numpy as onp
 import jax.numpy as jnp
 import jax.random as jr
 import optax
-from datetime import datetime
 
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
-import time
-from tqdm.auto import trange
-import wandb
-
 import matplotlib.pyplot as plt
-import matplotlib.colors as mplc
-from scipy.cluster.hierarchy import linkage, leaves_list    # For hierarchically clustering topics
-import pandas as pd                                         # For making time-of-day tick labels
 
 from dtd.model3d import DirichletTuckerDecomp
 from kf_viz import draw_syllable_factors, draw_circadian_bases
@@ -49,41 +43,72 @@ def get_unique_path(fpath, fmt='02d'):
 #                               FIT & EVALUATION                               #
 # ============================================================================ #
 
-def _get_subshape(X, axes: tuple=(0,)):
-    """Return shape of X along specified axes."""
-    return tuple([X.shape[i] for i in axes])
+def make_random_mask(key, shape, train_frac=0.8):
+    """Make binary mask to split data into train (1) and test (0) sets."""
+    return jr.bernoulli(key, train_frac, shape)
 
-def load_data(fpath_list: list[str]):
-    """Load data and metadata, and concatenate it along axis=0.
+def load_data(data_dir: Path,
+              max_samples: int=-1,
+              train_frac: float=0.8,
+              key: Optional[jr.PRNGKey]=None):
+    """Load data tensor 
+    
+    Load data and metadata, and concatenate it along axis=0.
     
     Parameters
-        fpath_list: list of file paths to load
+        data_dir: Directory containining .npz files of count tensors
+        max_samples: Maximum number of total days/sessions of data to load.
+            Loaded data is truncated; used for limiting dataset size for debugging.
+        train_frac: Fraction of data (batch dims) to use for training.
+            Valid PRNGKey must be passed in; else, it is ignored
+        key: PRGKey for generating train/test mask. If None, no data is held-out.
 
     Returns
-        data: uint tensor of syllable data per timebin
-        ages: list of recording ages, by subject
-        names: list of subject names
+        total_counts: int. Normalized count value of data tensor
+        X: UInt[Array, "n_samples n_bins n_syllables"]
+        mask: Int[Array, "n_samples n_bins"]
+        ages: Int[Array, "n_samples"]
+        names: Object[Array, "n_samples"] 
     """
+    # These are data attributes that we would like to pass into the model.
+    # Currently, this is not fully supported, so we hardcode them here.
+    batch_axes, event_axes = (0,1), (2,)
 
-    counts, ages, names = [], [], []
+    # Load data tensor and its metadata from all files in data_dir, concatenate
+    #   X: UInt array, (n_samples, n_bins, n_syllables).
+    #   ages: list, (n_samples,). Age/days since hatch.
+    #   names: list, (n_samples,). Subject names, in long form.
+    print("Loading data...",end="")
+    fpath_list = sorted([f for f in Path(data_dir).rglob("*") if f.is_file()])
+
+    X, ages, names = [], [], []
     for fpath in fpath_list:
         fpath = Path(fpath)
 
         names.append(fpath.stem[3:])
         with jnp.load(fpath) as f:
-            counts.append(f['counts'])
+            X.append(f['counts'])
             ages.append(f['session_ids'])
-        
-    return {
-        'X': jnp.concatenate(counts, axis=0),
-        'batch_axes': (0,1),
-        'ages': ages, 
-        'names': names
-    }
+    
+    X = jnp.concatenate(X, axis=0)[:max_samples]
+    ages = jnp.array(ages)[:max_samples]
+    names = jnp.array(names)[:max_samples]
+    print("Done.")
 
-def make_random_mask(key, shape, train_frac=0.8):
-    """Make binary mask to split data into train (1) and test (0) sets."""
-    return jr.bernoulli(key, train_frac, shape)
+    # Create a random mask along batch dimensions (non-normalized dimensions)
+    batch_shape = tuple([X.shape[i] for i in batch_axes])
+    mask = (make_random_mask(key, batch_shape, train_frac)
+            if isinstance(key, jr.PRNGKey)
+            else jnp.ones(batch_shape, dtype=int))
+    
+    # Get total counts. Event axes are, by dimension, the axes along which
+    # the data tensor X sums to a constant number.
+    total_counts = X.sum(axis=event_axes)
+    assert jnp.all(total_counts==(total_counts.reshape[-1])[0]), \
+        f'Expected data tensor to have a normalized number of counts along the event dimensions {event_axes}.'
+    total_counts = int((total_counts.reshape[-1])[0])
+
+    return total_counts, X, mask, ages, names
 
 def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
               lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, drop_last=False,
@@ -222,29 +247,13 @@ def run_one(datadir, k1, k2, k3, seed, alpha, train_frac=0.8,
     key = jr.PRNGKey(seed)
     key_mask, key_fit = jr.split(key)
 
-    # Load data from input directory. Search in all subdirectories
-    print("Loading data...",end="")
-    fpath_list = sorted([f for f in Path(datadir).rglob("*") if f.is_file()])
-    data = load_data(fpath_list)
-    
-    # Cast integer counts to float32 dtype
-    X = jnp.asarray(data['X'], dtype=jnp.float32)[:max_samples]
-    print("Done.")
+    total_counts, X, mask, _, _ = load_data(datadir,
+                                            max_samples=max_samples,
+                                            train_frac=train_frac,
+                                            key=key_mask)
+    # Convert UInt data tensor to float32 dtype
+    X = jnp.asarray(X, dtype=jnp.float32)
     print(f"\tData array: shape {X.shape}, {X.nbytes/(1024**3):.1f}GB")
-
-    # Create random mask to hold-out data for validation
-    batch_shape = _get_subshape(X, data['batch_axes'])
-    mask = make_random_mask(key_mask, batch_shape, train_frac)
-
-    # Get total counts. Since any random batch indices should give the same number
-    # counts, i.e. if X has batch_axes of (0,1), then X[i,j].sum() = C for all i,j,
-    # and since we assume that the batch axes are the leading dimensions, we can
-    # calculate the total counts  of data by abusing data['batch_axes'] as indices
-    total_counts = float(X[data['batch_axes']].sum())
-    assert total_counts.is_integer(), \
-        f'Expected `total_counts` to be integer values, but got {total_counts}'
-    total_counts = int(total_counts)
-    del data
 
     # Fit the model
     params, lps = fit_model(
