@@ -51,7 +51,7 @@ def load_data(data_dir: Path,
               max_samples: int=-1,
               train_frac: float=0.8,
               key: Optional[jr.PRNGKey]=None,
-              verbose: Optiona[bool]=False):
+              verbose: Optional[bool]=False):
     """Load data tensor 
     
     Load data and metadata, and concatenate it along axis=0.
