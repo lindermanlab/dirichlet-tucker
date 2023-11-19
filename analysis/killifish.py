@@ -50,7 +50,8 @@ def make_random_mask(key, shape, train_frac=0.8):
 def load_data(data_dir: Path,
               max_samples: int=-1,
               train_frac: float=0.8,
-              key: Optional[jr.PRNGKey]=None):
+              key: Optional[jr.PRNGKey]=None,
+              verbose: Optiona[bool]=False):
     """Load data tensor 
     
     Load data and metadata, and concatenate it along axis=0.
@@ -78,7 +79,7 @@ def load_data(data_dir: Path,
     #   X: UInt array, (n_samples, n_bins, n_syllables).
     #   ages: list, (n_samples,). Age/days since hatch.
     #   names: list, (n_samples,). Subject names, in long form.
-    print("Loading data...",end="")
+    if verbose: print("Loading data...",end="")
     fpath_list = sorted([f for f in Path(data_dir).rglob("*") if f.is_file()])
 
     X, ages, names = [], [], []
@@ -93,7 +94,7 @@ def load_data(data_dir: Path,
     X = jnp.concatenate(X, axis=0)[:max_samples]
     ages = onp.concatenate(ages)[:max_samples]
     names = onp.concatenate(names)[:max_samples]
-    print("Done.")
+    if verbose: print("Done.")
 
     # Create a random mask along batch dimensions (non-normalized dimensions)
     batch_shape = tuple([X.shape[i] for i in batch_axes])
@@ -111,7 +112,7 @@ def load_data(data_dir: Path,
 
 def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
               lr_schedule_fn=None, minibatch_size=1024, n_epochs=100, drop_last=False,
-              wnb=None):
+              wnb=None, verbose=False):
     """Fit 3D DTD model to data using stochastic fit algoirthm.
 
     (New) parameters
@@ -132,13 +133,13 @@ def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
     model = DirichletTuckerDecomp(total_counts, k1, k2, k3, alpha)
 
     # Randomly initialize parameters
-    print("Initializing model...", end="")
+    if verbose: print("Initializing model...", end="")
     d1, d2, d3 = X.shape
     init_params = model.sample_params(key_init, d1, d2, d3)
-    print("Done.")
+    if verbose: print("Done.")
 
     # Fit model to data with EM
-    print(f"Fitting model with {method} EM...", end="")
+    if verbose: print(f"Fitting model with {method} EM...", end="")
     if method == 'stochastic':
         # Set default learning rate schedule function if none provided
         lr_schedule_fn = lr_schedule_fn if lr_schedule_fn is not None else DEFAULT_LR_SCHEDULE_FN
@@ -149,15 +150,15 @@ def fit_model(method, key, X, mask, total_counts, k1, k2, k3, alpha=1.1,
     else:
         params, lps = model.fit(X, mask, init_params, n_epochs, wnb=wnb)
 
-    print("Done.")
+    if verbose:  print("Done.")
 
     return model, params, lps
 
-def evaluate_fit(model, X, mask, params, ):
+def evaluate_fit(model, X, mask, params, verbose=False):
     """Compute heldout log likelihood and percent deviation from saturated model."""
 
     # Compute test log likelihood
-    print("Evaluating fit...", end="")
+    if verbose: print("Evaluating fit...", end="")
     test_ll = model.heldout_log_likelihood(X, mask, params)
 
     # Compute test ll under baseline model (average syllable usage across all held-in samples)
@@ -177,7 +178,7 @@ def evaluate_fit(model, X, mask, params, ):
     # saturated model (upper bound), relative to baseline (lower bound).
     pct_dev = (test_ll - baseline_test_ll) / (saturated_test_ll - baseline_test_ll)
     pct_dev *= 100
-    print("Done.")
+    if verbose: print("Done.")
 
     return pct_dev, test_ll, baseline_test_ll, saturated_test_ll
 
