@@ -12,10 +12,11 @@ e.g. avg_test_lps, avg_baseline_ll + etc, avg_lofo_test_ll_1 + etc, seed, run_id
 """
 
 from __future__ import annotations
-import os
 from pathlib import Path
 import wandb
 import time
+from tqdm.auto import tqdm
+import gc
 
 import numpy as onp
 import jax.numpy as jnp
@@ -25,8 +26,9 @@ from dtd.model3d import DirichletTuckerDecomp
 from dtd.utils import get_wnb_project_df, download_wnb_params
 
 from killifish import load_data, evaluate_fit, make_random_mask
-
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+mpl.use('Agg')    # use non-interactive backend to prevent mem leak
 from kf_viz import draw_syllable_factors, draw_circadian_bases
 
 # --------------------------------------------------------------
@@ -37,11 +39,11 @@ OUT_DIR =  Path('/scratch/groups/swl1/killifish/p3_20230726-20230915') / wnb_pro
 DATA_DIR = Path('/scratch/groups/swl1/killifish/p3_20230726-20230915/q2-aligned_10min')
 
 # --------------------------------------------------------------
-# We can save time by loading data once!! However, make to ignore mask
-total_counts, X, _, _, _ = load_data(DATA_DIR, key=None)
 
-def main(run_id, seed, k1, k2, k3):
-    # Generate mask, as it was generated in the original script
+def reeval_run(total_counts, X, run_id, seed, k1, k2, k3, verbose=False):
+    """Re-evaluate finished run -- with parameters sorted by lofo and reporting more measures."""
+    
+    # Load data and generate generate mask
     key = jr.PRNGKey(seed)
     key_mask, _ = jr.split(key)
     mask = make_random_mask(key_mask, X.shape[:-1], train_frac=0.8)
@@ -60,9 +62,9 @@ def main(run_id, seed, k1, k2, k3):
                                         = evaluate_fit(model, X, mask, params)
     
     # Sort parameters by their variance explained
-    print("Sorting parameters...", end='')
+    if verbose: print("Sorting parameters...", end='')
     params, lofo_test_lls = model.sort_params(X, mask, params)
-    print("Done.")
+    if verbose: print("Done.")
     
     # Save results locally
     run_root_dir = OUT_DIR / run_id
@@ -102,15 +104,31 @@ def main(run_id, seed, k1, k2, k3):
     run.upload_file(str(fpath_params), root=str(run_root_dir))
     run.upload_file(str(fpath_topics), root=str(run_root_dir))
     run.upload_file(str(fpath_bases), root=str(run_root_dir))
-    wandb.finish()
+
+    # Explicitly delete variables to avoid memory leak
+    del test_ll, baseline_test_ll, saturated_test_ll
+    del params
+    del lofo_test_lls
+    del fig_topics, fig_bases
+    del model
     return
 
-# Retrieve "id", "name", "seed"
-config_keys, summary_keys = ['seed', 'k1', 'k2', 'k3'], []
-df = get_wnb_project_df(wnb_entity, wnb_project, config_keys, summary_keys)
+if __name__ == "__main__":
+    # Load data
+    total_counts, X, _, _, _ = load_data(DATA_DIR, key=None, verbose=False)
+    X = jnp.asarray(X, dtype=jnp.float32)
+    
+    # Retrieve "id", "name", "seed"
+    config_keys, summary_keys = ['seed', 'k1', 'k2', 'k3'], []
+    df = get_wnb_project_df(wnb_entity, wnb_project, config_keys, summary_keys)
+    
+    for run_info in tqdm(df.itertuples(), total=len(df)):
+        start_time = time.time()
+        reeval_run(total_counts, X, run_info.id, run_info.seed, run_info.k1, run_info.k2, run_info.k3)
+        run_time = time.time() - start_time
 
-for i_df, run_info in df.iterrows():
-    start_time = time.time()
-    print(run_info)
-    main(run_info['id'], run_info['seed'], run_info['k1'], run_info['k2'], run_info['k3'])
-    print("run time:", time.time() - start_time)
+        # Record in text file
+        with open('kf_lofo_complete.csv', 'a') as f:
+            f.write(f'{run_info.id}, {run_time}\n')
+
+        gc.collect()
