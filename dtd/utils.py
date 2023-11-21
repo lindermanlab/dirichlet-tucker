@@ -157,7 +157,7 @@ def download_wnb_params(entity: str,
             PARAMS_PATH / RUN_ID / params.npz
 
     Returns
-        params: tuple of fitted parameters, (G, F1,...Fn)
+        params: dict of fitted parameters and associated data
     """
 
     if params_path is None:
@@ -183,6 +183,6 @@ def download_wnb_params(entity: str,
             shutil.rmtree(temp_path)
 
     # Load the parameters, retrieve the seed, and return
-    params = onp.load(true_path/'params.npz')
+    params = onp.load(true_path/'params.npz', allow_pickle=True)
 
-    return params['G'], params['F1'], params['F2'], params['F3']
+    return {k: params[k] for k in params.files}
