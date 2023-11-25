@@ -107,7 +107,7 @@ def make_tod_series(freq):
 
     return pd.date_range('00:00:00', last_label, freq=freq).time
 
-def draw_circadian_bases(params, autosort=True, axs=None):
+def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
     circadian_bases = params[2]
     D, K = circadian_bases.shape
 
@@ -138,7 +138,7 @@ def draw_circadian_bases(params, autosort=True, axs=None):
                         va='top', fontsize='small')
         
         # Label x-axis with time-of-day from 0H - 24H, every 2H
-        t_dts = make_tod_series('2H')        
+        t_dts = make_tod_series(tod_freq)
         t_locs = onp.concatenate([onp.linspace(0, D, num=len(t_dts), endpoint=False), [D]])
         t_labels = list(map(lambda dt: dt.strftime('%H'), t_dts)) + ['24']
         
