@@ -5,10 +5,69 @@ import itertools
 import numpy as onp
 import pandas as pd
 
+import seaborn as sns
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplc
 from scipy.cluster.hierarchy import linkage, leaves_list    # For hierarchically clustering topics
 
+class ScalarMappable(mpl.cm.ScalarMappable):
+    """Add callable functionality to mplc.ScalarMappable mixin-class."""
+    
+    def __init__(self, norm=None, cmap=None):
+        """
+        Parameters
+        ----------
+        norm : `.Normalize` (or subclass thereof) or str or None
+            The normalizing object which scales data, typically into the
+            interval ``[0, 1]``.
+            If a `str`, a `.Normalize` subclass is dynamically generated based
+            on the scale with the corresponding name.
+            If *None*, *norm* defaults to a *colors.Normalize* object which
+            initializes its scaling based on the first data processed.
+        cmap : str or `~matplotlib.colors.Colormap`
+            The colormap used to map normalized data values to RGBA colors.
+        """
+        super().__init__(norm=norm, cmap=cmap)
+
+    def __call__(self, x):
+        return self.to_rgba(x)
+
+
+def multicolored_lineplot(x, y, c, cmap: mplc.Colormap, norm: mplc.Normalize, alpha: float=1):
+    """Create LineCollection colored by the value of `c` in the normalized colormap space.
+
+    The `vmin` and `vmax` parameters of `norm` must be set to correspond with
+    expected values of `c` for proper color mapping.
+    
+    Add to plot via `ax.add_collection(lc)`
+
+    Parameters
+        x: ndarray, shape (N,)
+        y: ndarray, shape (N,)
+        c: ndarray, shape (N,)
+        cmap: mplc.Colormap
+        norm: mplc.Normalize
+        alpha: float=1
+
+    Reference:
+    https://matplotlib.org/stable/gallery/lines_bars_and_markers/multicolored_line.html
+    """
+    
+    # Array of x-y points, shape (N,1,2)
+    xy_pts = onp.array([x, y]).T.reshape(-1,1,2)
+
+    # Array of x-y line segments, shape (N-1, 1, 2)
+    segments = onp.concatenate([xy_pts[1:], xy_pts[:-1]], axis=1)
+
+    # Creae a LineCollection that uses the specified cmap
+    lc = mpl.collections.LineCollection(segments, cmap=cmap, norm=norm)
+    lc.set_array(c[1:])
+    lc.set_alpha(alpha)
+
+    return lc
+    
+# ==============================================================================
 # Syllable permutations, based on KL-divergence of syllable parameters
 # - SYLLABLE_PERM_DICT: Consists of (cluster_name: indices) items and is used
 #                       for annotating figures (see `set_syllable_cluster_ticks`)
@@ -164,3 +223,55 @@ def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
         ax.spines['right'].set_visible(False)
 
     return plt.gcf()
+
+# ==============================================================================
+# Blue to green to yellow
+LIFESPAN_PALETTE = sns.color_palette("blend:#5A99AD,#7FAB5E,#C7B069", as_cmap=True)
+LIFESPAN_PALETTE.set_under(color='#5A99AD')
+
+# PowerNorm with gamma > 1 spreads large number out, providing more resolution
+# Clip ages outside of 0.10-0.95 quantile
+ABS_AGE_NORM = mplc.PowerNorm(gamma=1.5, vmin=105, vmax=340, clip=True)
+
+# This colormap is both mappable (i.e. for colorbars) and callable (for cmap)
+LIFESPAN_CMAP = ScalarMappable(cmap=LIFESPAN_PALETTE, norm=ABS_AGE_NORM)
+
+def make_lifespan_colobar(**kwargs):
+    """Function to call fixed version of colorbar.
+
+    Issue
+    -----
+    plt.colorbar(LIFESPAN_CMAP, extend='both') results in the lower extension
+    being yellow, which is the `over` limit, instead of the blue `under` limit.
+    
+    This is because in L1082 of matplotlib.colorbar,
+    This is because the matplotlib colorbar boundary is extended by subtracting
+    1 from the current boundary (of 0), then pass
+    through the inverse of norm. However, this results in an (negative) overflow
+    which leads to the bottom triangle being 'yellow'.
+    To resolve this, we manually compute the boundaries, and associated values.
+
+    https://github.com/matplotlib/matplotlib/blob/eb02b108ea181930ab37717c75e07ba792e01f1d/lib/matplotlib/colorbar.py#L1082C26-L1082C26
+    """
+
+    # Generate default boundaries, port of `mpl.colobar._uniform_y
+    b = onp.linspace(0, 1, LIFESPAN_CMAP.cmap.N+1)
+
+    # Add extra boundaries because we are extending both ends
+    # But make sure to not subtract 1 from b[0], as original code does
+    b = onp.hstack([b[0], b, b[-1]+1])
+
+    # Transform form [0,1] back to cmap range
+    b = LIFESPAN_CMAP.norm.inverse(b)
+
+    # Calculate values between boundaries
+    v = 0.5 * (b[:-1] + b[1:])
+
+    # Make colorbar
+    bad_kws = ['extend', 'boundaries', 'values', 'ticks', 'format']
+    cbar = plt.colorbar(LIFESPAN_CMAP,
+                        extend='both', boundaries=b, values=v,
+                        ticks=onp.arange(120, 360, 30), format=mpl.ticker.ScalarFormatter(),
+                        **{k: v for k, v in kwargs.items() if k not in bad_kws})
+    
+    return cbar
