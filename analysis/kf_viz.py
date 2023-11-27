@@ -166,8 +166,8 @@ def make_tod_series(freq):
 
     return pd.date_range('00:00:00', last_label, freq=freq).time
 
-def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
-    circadian_bases = params[2]
+def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None):
+    circadian_bases = F2
     D, K = circadian_bases.shape
 
     # Permute the circadian bases so that they are sorted by earliest peak
@@ -189,12 +189,12 @@ def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
         # Plot basis, and adjust x-axis days with human-interpretable times
         ax.plot(circadian_bases[:,k])
     
-        # Grey out background if factor L2 norm is below a threshold
-        mag = onp.linalg.norm(circadian_bases[:,k])
-        if mag <= 0.3:
-            ax.set_facecolor('0.8')
-            ax.annotate(f'|factor|={mag:.2f}', (0.01,0.9), xycoords='axes fraction',
-                        va='top', fontsize='small')
+        # # Grey out background if factor L2 norm is below a threshold
+        # mag = onp.linalg.norm(circadian_bases[:,k])
+        # if mag <= 0.3:
+        #     ax.set_facecolor('0.8')
+        #     ax.annotate(f'|factor|={mag:.2f}', (0.01,0.9), xycoords='axes fraction',
+        #                 va='top', fontsize='small')
         
         # Label x-axis with time-of-day from 0H - 24H, every 2H
         t_dts = make_tod_series(tod_freq)
@@ -204,16 +204,12 @@ def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
         ax.set_xticks(t_locs)
         ax.set_xticklabels(t_labels)
 
-        # Label y-axis with "circadian bases"
-        if k == K // 2:
-            ax.set_ylabel('time-of-day factors / "circadian bases"')
-
         # Set axis limits; reduce blank space margins
         ax.set_ylim(bottom=-0.1, top=1.1*ymax)
         ax.margins(x=0.01, y=0.5)
 
         # Draw time-of-day ticks; only annotate bottom-most subplot
-        ax.tick_params(labelleft=False, labelbottom=False)
+        ax.tick_params(labelbottom=False)
         if k == K-1:
             ax.tick_params(labelbottom=True)
             ax.set_xlabel('time of day [24hr]')
@@ -227,7 +223,6 @@ def draw_circadian_bases(params, tod_freq='2H', autosort=True, axs=None):
 # ==============================================================================
 # Blue to green to yellow
 LIFESPAN_PALETTE = sns.color_palette("blend:#5A99AD,#7FAB5E,#C7B069", as_cmap=True)
-LIFESPAN_PALETTE.set_under(color='#5A99AD')
 
 # PowerNorm with gamma > 1 spreads large number out, providing more resolution
 # Clip ages outside of 0.10-0.95 quantile
