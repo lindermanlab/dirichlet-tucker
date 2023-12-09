@@ -50,8 +50,12 @@ def reeval_run(total_counts, X, run_id, seed, k1, k2, k3, verbose=False):
     
     # Load fitted params
     params = download_wnb_params(wnb_entity, wnb_project, run_id, OUT_DIR)
-    assert params[0].shape == (k1,k2,k3), \
-        f"Expected loaded core tensor to have shape ({k1}, {k2}, {k3}), but got {params[0].shape}."
+    try:
+        assert params[0].shape == (k1,k2,k3), \
+            f"Expected loaded core tensor to have shape ({k1}, {k2}, {k3}), but got {params[0].shape}."
+    except:
+        print(f"{run_id}: Expected loaded core tensor to have shape ({k1}, {k2}, {k3}), but got {params[0].shape}.")
+        return 1
 
     # Instantiate model
     alpha = 1.1
@@ -111,7 +115,7 @@ def reeval_run(total_counts, X, run_id, seed, k1, k2, k3, verbose=False):
     del lofo_test_lls
     del fig_topics, fig_bases
     del model
-    return
+    return 0
 
 if __name__ == "__main__":
     # Load data
@@ -121,14 +125,19 @@ if __name__ == "__main__":
     # Retrieve "id", "name", "seed"
     config_keys, summary_keys = ['seed', 'k1', 'k2', 'k3'], []
     df = get_wnb_project_df(wnb_entity, wnb_project, config_keys, summary_keys)
+    df = df[1370:] # debug only
     
     for run_info in tqdm(df.itertuples(), total=len(df)):
         start_time = time.time()
-        reeval_run(total_counts, X, run_info.id, run_info.seed, run_info.k1, run_info.k2, run_info.k3)
+        ret = reeval_run(total_counts, X, run_info.id, run_info.seed, run_info.k1, run_info.k2, run_info.k3)
         run_time = time.time() - start_time
 
         # Record in text file
-        with open('kf_lofo_complete.csv', 'a') as f:
-            f.write(f'{run_info.id}, {run_time}\n')
+        if ret == 0:
+            with open('kf_lofo_complete.csv', 'a') as f:
+                f.write(f'{run_info.id}, {run_time}\n')
+        else:
+            with open('kf_lofo_corrupted.csv', 'a') as f:
+                f.write(f'{run_info.id}, {run_info.name}, \n')
 
         gc.collect()
