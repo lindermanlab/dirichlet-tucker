@@ -225,8 +225,9 @@ def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None):
 LIFESPAN_PALETTE = sns.color_palette("blend:#5A99AD,#7FAB5E,#C7B069", as_cmap=True)
 
 # PowerNorm with gamma > 1 spreads large number out, providing more resolution
-# Clip ages outside of 0.10-0.95 quantile
-ABS_AGE_NORM = mplc.PowerNorm(gamma=1.5, vmin=105, vmax=340, clip=True)
+# Changed 12/2023: Median lifespan (green) roughly in the range of 120 (4 mo)
+# to 280 days (9+ mo). Previously colorbar colored 120 day fish as "short lived".
+ABS_AGE_NORM = mplc.PowerNorm(gamma=1.3, vmin=60, vmax=320, clip=True)
 
 # This colormap is both mappable (i.e. for colorbars) and callable (for cmap)
 LIFESPAN_CMAP = ScalarMappable(cmap=LIFESPAN_PALETTE, norm=ABS_AGE_NORM)
