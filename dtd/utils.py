@@ -137,6 +137,7 @@ def download_wnb_params(entity: str,
                         project: str,
                         run_id: str,
                         params_path: Optional[Path]=None,
+                        update: bool=False
                         ) -> tuple[Array]:
     """Download WandB <entity/project/run_id> fitted parameters.
 
@@ -155,6 +156,7 @@ def download_wnb_params(entity: str,
         run_id: WandB unique identifier, not the human-readable name
         params_path: parent directory to save params file to, i.e.
             PARAMS_PATH / RUN_ID / params.npz
+        update: If True, re-download and overwrite existing params
 
     Returns
         params: dict of fitted parameters and associated data
@@ -164,10 +166,15 @@ def download_wnb_params(entity: str,
         true_path = Path(f'../temp/{run_id}')
     else:
         true_path = params_path / run_id
+    
+    # If `update==True`, delete path at PARAMS_PATH if it exists to trigger re-download
+    if update and true_path.exists():
+        shutil.rmtree(true_path)
+
     true_path.mkdir(parents=True, exist_ok=True)
 
-    # If the file already exists at PARAMS_PATH, do not re-download
-    if not (true_path.exists() and (true_path / 'params.npz').is_file()):
+    # If file does not yet exist at PARAMS_PATH, download
+    if not (true_path / 'params.npz').is_file():
         # Download to local temporary folder
         temp_path = f'../temp/{run_id}'
 
