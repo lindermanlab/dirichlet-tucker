@@ -9,6 +9,7 @@ import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mplc
+from matplotlib.patches import Patch
 from scipy.cluster.hierarchy import linkage, leaves_list    # For hierarchically clustering topics
 
 class ScalarMappable(mpl.cm.ScalarMappable):
@@ -72,6 +73,7 @@ def multicolored_lineplot(x, y, c, cmap: mplc.Colormap, norm: mplc.Normalize, al
 # - SYLLABLE_PERM_DICT: Consists of (cluster_name: indices) items and is used
 #                       for annotating figures (see `set_syllable_cluster_ticks`)
 # - SYLLABLE_PERM: Used for permutating syllable parameters
+# ==============================================================================
 SYLLABLE_PERM_DICT = OrderedDict([
     ('inactive', [91, 97, 30, 10, 1, 43, 69] + [33,] + [99,]),                   # 99: Belly
     ('pause and drift', [32, 51, 82, 0, 56, 14, 19, 84, 92, 7, 66, 3, 17, 57, 85, 46, 27, 65]),
@@ -147,6 +149,8 @@ def draw_syllable_factors(params, autosort=True, ax=None):
     return topic_perm
 
 # ==============================================================================
+# CIRCADIAN BASES
+# ==============================================================================
 def make_tod_series(freq):
     """Make time-of-day datetime.time points spaced at the given frequency.
 
@@ -221,6 +225,8 @@ def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None):
     return plt.gcf()
 
 # ==============================================================================
+# AGE FACTORS
+# ==============================================================================
 # Blue to green to yellow
 LIFESPAN_PALETTE = sns.color_palette("blend:#5A99AD,#7FAB5E,#C7B069", as_cmap=True)
 
@@ -271,3 +277,110 @@ def make_lifespan_colobar(**kwargs):
                         **{k: v for k, v in kwargs.items() if k not in bad_kws})
     
     return cbar
+
+# ==============================================================================
+# Cross-validation
+# ==============================================================================
+
+def draw_cross_validation_split(ax, cv, X, y, group, lw=10,
+                                cmap_cv=plt.cm.coolwarm, cmap_class=plt.cm.Paired, cmap_group=plt.cm.Paired):
+    """Visualize cross-validation splits.
+
+    Parameters
+    ----------
+    ax: matplotlib.axes.Axes
+    cv: sklearn.model_selection._BaseKFold
+    X: Number[Array, "n_samples ..."]
+    y: Int[Array, "n_samples"]
+    group: Int[Array, "n_samples"]
+    lw: float
+        
+    Source
+    ------
+    https://scikit-learn.org/stable/auto_examples/model_selection/plot_cv_indices.html
+    """
+
+    n_samples = len(X)
+    n_splits = cv.n_splits
+
+    # Plot class and group
+    ax.scatter(range(n_samples), [-1.5,]*n_samples, c=y, cmap=cmap_class, marker="_", lw=lw)
+    ax.scatter(range(n_samples), [-2.5,]*n_samples, c=group, cmap=cmap_group, marker="_", lw=lw)
+
+    # Plot cross-validation splits
+    for i_split, (tr, tt) in enumerate(cv.split(X=X, y=y, groups=group)):
+        # Fill in indices with the training/test groups
+        indices = onp.ones(n_samples) * onp.nan
+        indices[tt] = 1
+        indices[tr] = 0
+
+        # Visualize the results
+        ax.scatter(
+            range(n_samples), [i_split + 0.5] * n_samples,
+            c=indices, cmap=cmap_cv, vmin=-0.2, vmax=1.2,
+            marker="_", lw=lw,
+        )
+
+    # Formatting
+    yticklabels = ["group", "class"] + list(range(n_splits))
+    ax.set(
+        yticks=[-2.5, -1.5, *onp.arange(n_splits)+0.5],
+        yticklabels=yticklabels,
+        xlabel="Sample index",
+        ylim=[n_splits + 0.2, -3.2],
+        xmargin=0.01,
+    )
+    
+    ax.text(-0.05, i_split/2+0.5, 'CV iteration', rotation=90, ha='right', va='center', transform=ax.get_yaxis_transform())
+    
+    ax.set_title(f"{type(cv).__name__}(seed={cv.random_state})", fontsize=13)
+
+    ax.spines[['top', 'right']].set_visible(False)
+    return
+
+def draw_lifespan_subject_cross_validation_split(ax, cv, X, lifespan_labels, subject_names, lw=10):
+    """Visualize killifish StratifiedGroupKFold cross-validation split."""
+    # Keep cross-validation colors simple -- we have lots of colors going on else where
+    cmap_cv = plt.cm.Greys
+
+    # We have many subjects, so make sure to explicitly repeat colormap
+    n_subjects = len(onp.unique(subject_names))
+    cmap_group = [*plt.cm.Paired.colors]
+    cmap_group = cmap_group * int(onp.ceil(n_subjects / len(cmap_group)))
+    cmap_group = mpl.colors.ListedColormap(colors=cmap_group)
+    _, subject_integer_labels = onp.unique(subject_names, return_inverse=True)
+    
+    # Use LIFESPAN_CMAP for discrete lifespan labels
+    cmap_class = LIFESPAN_CMAP.cmap
+    ls_legend_lhs = [("Short", Patch(color=cmap_class(0))),
+                     ("Median", Patch(color=cmap_class(200))),
+                     ("Long", Patch(color=cmap_class(500)))]
+    
+    # Convert class labels from "Short", "Median", and "Long" to LIFESPAN_CMAP-compatible integer mapping
+    assert onp.all(onp.sort(onp.unique(lifespan_labels)) == ['long', 'median', 'short']), \
+        f"Expected class labels to only consist of  ['long', 'median', 'short'], but got {onp.unique(lifespan_labels)}"
+    lifespan_integer_labels = onp.ones(len(lifespan_labels)) * 200
+    lifespan_integer_labels[lifespan_labels=='short'] = 0
+    lifespan_integer_labels[lifespan_labels=='long'] = 500
+
+    # -----------------------------------------------------------------------------------
+    draw_cross_validation_split(ax, cv, X, lifespan_integer_labels, subject_integer_labels, lw=lw,
+                                cmap_cv=cmap_cv, cmap_class=cmap_class, cmap_group=cmap_group)
+    
+    # -----------------------------------------------------------------------------------
+    
+    _labels, _handles = list(zip(*ls_legend_lhs))
+    ls_legend = ax.legend(
+        [Patch(color=cmap_class(0)), Patch(color=cmap_class(200)), Patch(color=cmap_class(500))],
+        ["Short", "Median", "Long"], title="Lifespan label",
+        loc=(1.02, 0.67),
+    )
+    
+    ax.legend(
+        [Patch(color=cmap_cv(0.8)), Patch(color=cmap_cv(0.2))],
+        ["Test set", "Train set"], title='Dataset',
+        loc=(1.02, 0.2),
+    )
+    
+    ax.add_artist(ls_legend)
+    return
