@@ -27,9 +27,11 @@ export WANDB_DIR="$OUTDIR"
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.98
 
 # Remember to MANUALLY set project name in top of killifish.py script
-python killifish.py \
-    "$DATADIR" --k1 50 --k2 4 --k3 100 --alpha 1.1 \
-    --epoch 2500 \
+python -m pdb killifish.py \
+    "$DATADIR" --k1 20 --k2 4 --k3 30 --alpha 1.1 \
+    --data_seed 123 --init_seed 246 --val_frac 0.20 --test_frac 0.2 \
+    --epoch 500 \
+    --n_splits 1 \
     --method full \
-    --outdir "$OUTDIR" \
-    --drop_last --wandb
+    --out_dir "$OUTDIR" \
+    --drop_last
