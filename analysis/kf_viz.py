@@ -74,18 +74,33 @@ def multicolored_lineplot(x, y, c, cmap: mplc.Colormap, norm: mplc.Normalize, al
 #                       for annotating figures (see `set_syllable_cluster_ticks`)
 # - SYLLABLE_PERM: Used for permutating syllable parameters
 # ==============================================================================
+# February 2023
+# SYLLABLE_PERM_DICT = OrderedDict([
+#     ('inactive', [91, 97, 30, 10, 1, 43, 69] + [33,] + [99,]),                   # 99: Belly
+#     ('pause and drift', [32, 51, 82, 0, 56, 14, 19, 84, 92, 7, 66, 3, 17, 57, 85, 46, 27, 65]),
+#     ('straight swim', [9, 31, 28, 80, 68, 73, 6, 54, 58, 70, 39, 40, 25, 42, 89, 45, 77, 24, 60, 74, 94]),
+#     ('edge +\nsidebody', [63, 72, 15, 98, 23, 96, 36, 83, 55, 90, 76, 61, 88] + [50,]),
+#     ('j-turn +\nreverse', [44, 75, 59, 95, 48, 78, 18, 16, 35, 47],),
+#     ('aggression\n+ glass surf', [71, 11, 64, 81, 87, 20, 21, 37, 8, 41, 52, 26, 93, 38, 12, 22, 5]),
+#     ('nose down', [86, 49, 67, 79, 2, 13, 62, 29, 34, 4, 53]),
+# ])
 SYLLABLE_PERM_DICT = OrderedDict([
-    ('inactive', [91, 97, 30, 10, 1, 43, 69] + [33,] + [99,]),                   # 99: Belly
-    ('pause and drift', [32, 51, 82, 0, 56, 14, 19, 84, 92, 7, 66, 3, 17, 57, 85, 46, 27, 65]),
-    ('straight swim', [9, 31, 28, 80, 68, 73, 6, 54, 58, 70, 39, 40, 25, 42, 89, 45, 77, 24, 60, 74, 94]),
-    ('edge+sidebody', [63, 72, 15, 98, 23, 96, 36, 83, 55, 90, 76, 61, 88] + [50,]),
-    ('j-turn+reverse', [44, 75, 59, 95, 48, 78, 18, 16, 35, 47],),
-    ('aggression+glass surf', [71, 11, 64, 81, 87, 20, 21, 37, 8, 41, 52, 26, 93, 38, 12, 22, 5]),
-    ('nose down', [86, 49, 67, 79, 2, 13, 62, 29, 34, 4, 53]),
+    ('c0', [86, 16, 91, 26, 35, 27, 55, 57, 74,  0, 90,  3, 47]),
+    ('c1', [67, 87, 63, 32, 54,  5, 69,  4, 49,  2, 80, 83, 18, 38, 11,  8, 66]),
+    ('c2', [43, 78, 10, 20,31]),
+    ('c3', [15, 76]),
+    ('c4', [77, 84]),
+    ('c5', [73, 24,  1, 44]),
+    ('c6', [75, 62, 85]),
+    ('c7', [41, 60, 88, 25, 53, 37, 82, 29, 50]),
+    ('c8', [23, 79, 46, 81, 51, 59, 58, 94, 96, 65, 97, 56, 36,14, 17, 89]),
+    ('c9', [30, 45, 71, 40, 93, 39, 52]),
+    ('c10', [22, 70, 19, 92,  7, 13, 28, 64, 42, 61, 21, 99,  9, 33]),
+    ('c11', [12, 34, 68,  6, 48, 95, 72, 98])
 ])
 SYLLABLE_PERM = list(itertools.chain.from_iterable(SYLLABLE_PERM_DICT.values()))
 
-def set_syllable_cluster_ticks(ax=None, axis='x', font_kws={'fontsize': 'small'}):
+def set_syllable_cluster_ticks(ax=None, axis='x', font_kw={'fontsize': 'small'}):
     """Label specified axis with syllable _cluster_ names."""
 
     if ax is None:
@@ -100,12 +115,17 @@ def set_syllable_cluster_ticks(ax=None, axis='x', font_kws={'fontsize': 'small'}
     if axis == 'x':
         # Draw major ticks
         ax.set_xticks(maj_ticks)
-        ax.tick_params(axis='x', which='major', length=5, labelbottom=False,)
+        ax.tick_params(axis='x', which='major', length=5,
+                       top=True, labeltop=False,
+                       bottom=False, labelbottom=False)
         ax.grid(visible=True, which='major', axis='x', alpha=0.2, lw=0.5)
 
         # Annotate between the ticks
-        ax.set_xticks(min_ticks, cluster_names, minor=True, **font_kws)
-        ax.tick_params(axis='x', which='minor', bottom=False, labelbottom=True)
+        ax.set_xticks(min_ticks, minor=True)
+        ax.set_xticklabels(cluster_names, minor=True,  fontdict=font_kw)
+        ax.tick_params(axis='x', which='minor', pad=0.5,
+                       top=False, labeltop=True,
+                       bottom=False, labelbottom=False)
     else:
         # Draw major ticks
         ax.set_yticks(maj_ticks)
@@ -113,14 +133,15 @@ def set_syllable_cluster_ticks(ax=None, axis='x', font_kws={'fontsize': 'small'}
         ax.grid(visible=True, axis='y', which='major', alpha=0.2, lw=0.5)
 
         # Annotate between the ticks
-        ax.set_yticks(min_ticks, cluster_names, minor=True, **font_kws)
+        ax.set_yticks(min_ticks, minor=True)
+        ax.set_yticklabels(cluster_names, minor=True, fontdict=font_kw)
         ax.tick_params(axis='y', which='minor', left=False, labelleft=True)
     
     return ax
 
-def draw_syllable_factors(params, autosort=True, ax=None):
+def draw_syllable_factors(F3, autosort=True, ax=None, im_kw={'cmap': 'magma', 'norm': mplc.LogNorm(0.5/100, 1.0)}):
     # Permute syllables to match our KL-clustering for better interpretability
-    syllable_factors = params[3][:,SYLLABLE_PERM]
+    syllable_factors = onp.copy(F3)[:,SYLLABLE_PERM]
     K, D = syllable_factors.shape
 
     # Use hiearchical clustering on syllable factor ("behavioral topic") axis
@@ -136,15 +157,22 @@ def draw_syllable_factors(params, autosort=True, ax=None):
     # ------------------------------------------------------------------------
     ax = plt.gca() if ax is None else ax
 
-    im = ax.imshow(syllable_factors, interpolation='none', aspect='auto',
-                   cmap='magma', norm=mplc.LogNorm(0.5/D, 1.0))
-    set_syllable_cluster_ticks(ax)
-    plt.colorbar(im, ax=ax, extend='min')
+    im = ax.imshow(syllable_factors, interpolation='none', aspect='auto', **im_kw)
+    
+    cbar = plt.colorbar(im, ax=ax, extend='min',
+                        location='bottom', fraction=0.02, pad=0.05,)
+    cbar.ax.tick_params(labelsize='x-small')
+    # cbar.ax.text(0, 1, 'syllable usage',
+    #              fontsize='small', ha='center', va='baseline',)
+
+    # Annotate top with syllable clustering names
+    set_syllable_cluster_ticks(ax, font_kw={'fontsize': 'small', 'color':'0.4',})
 
     # Visually demarcate each behavioral topic
-    ax.set_yticks(onp.arange(K)-0.5, [])
+    ax.set_yticks(onp.arange(K)-0.5)
+    ax.tick_params(axis='y', labelleft=False)
     ax.grid(visible=True, which='major', axis='y', alpha=0.8, lw=0.5)
-    ax.set_ylabel('syllable factors / "behavioral topics"')
+    ax.set_ylabel('behavioral topics')
 
     return topic_perm
 
@@ -170,7 +198,8 @@ def make_tod_series(freq):
 
     return pd.date_range('00:00:00', last_label, freq=freq).time
 
-def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None):
+def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None,
+                         fill_kw={'color': '0.9', 'ec': '0.4'}):
     circadian_bases = F2
     D, K = circadian_bases.shape
 
@@ -191,14 +220,8 @@ def draw_circadian_bases(F2, tod_freq='2H', autosort=True, axs=None):
         
     for k, ax in enumerate(axs):
         # Plot basis, and adjust x-axis days with human-interpretable times
-        ax.plot(circadian_bases[:,k])
-    
-        # # Grey out background if factor L2 norm is below a threshold
-        # mag = onp.linalg.norm(circadian_bases[:,k])
-        # if mag <= 0.3:
-        #     ax.set_facecolor('0.8')
-        #     ax.annotate(f'|factor|={mag:.2f}', (0.01,0.9), xycoords='axes fraction',
-        #                 va='top', fontsize='small')
+        # ax.plot(circadian_bases[:,k], **kw)
+        ax.fill_between(range(D), onp.zeros(D), circadian_bases[:,k], **fill_kw)
         
         # Label x-axis with time-of-day from 0H - 24H, every 2H
         t_dts = make_tod_series(tod_freq)
