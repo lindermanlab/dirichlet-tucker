@@ -1,8 +1,8 @@
 """Three-mode Poisson Tucker model variants"""
 
 from typing import Optional, Sequence, Tuple, Union
-from jaxtyping import Array, Bool, Float, Integer
 from jax._src.prng import PRNGKeyArray
+from jaxtyping import Array, Bool, Float, Integer
 
 import warnings
 import time
@@ -67,23 +67,19 @@ class PoissonTucker(eqx.Module):
     F1_param: Float[Array, "d1 k1"]
     F2_param: Float[Array, "d2 k2"]
     F3_param: Float[Array, "d3 k3"]
-    event_ndims: int = eqx.static_field()
-    
 
-    def __init__(self, *params, event_ndims: int=1):
-        if event_ndims != 1:
-            raise ValueError(
-                f"Only event_ndims= 1 is currently supported, but got {event_ndims}." \
-                "Dynamic event dimensioning may be explored in the future. For now," \
-                "create a new class and handle event dimensioning manually."
-            )
+    def __init__(self,
+                 G_param: Float[Array, "k1 k2 k3"],
+                 F1_param: Float[Array, "d1 k1"],
+                 F2_param: Float[Array, "d2 k2"],
+                 F3_param: Float[Array, "d3 k3"],
+                 /
+    ):
         
-        self.G_param = params[0]
-        self.F1_param = params[1]
-        self.F2_param = params[2]
-        self.F3_param = params[3]
-
-        self.event_ndims = event_ndims
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
     
 
     @classmethod
@@ -189,7 +185,8 @@ class PoissonTucker(eqx.Module):
         
     def sample(self,
                key: PRNGKeyArray,
-               sample_shape: tuple=()) -> Integer[Array, "..."]:
+               sample_shape: tuple=(),
+    ) -> Integer[Array, "..."]:
         """Sample a data tensor from the parameterized decompositions.
         
         Parameters
