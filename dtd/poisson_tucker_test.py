@@ -24,4 +24,4 @@ def test_poisson_tucker(full_shape=(10,8,5),
     assert samples.shape == (*sample_shape, *full_shape)
 
     lp = model.log_prob(samples)
-    assert jnp.isfinite(lp)
+    assert jnp.all(jnp.isfinite(lp))

@@ -148,6 +148,23 @@ class PoissonTucker(eqx.Module):
     def params(self,) -> tuple:
         return self.G_param, self.F1_param, self.F2_param, self.F3_param
     
+    def random_mask(self, key: PRNGKeyArray, frac: float=1.0) -> Bool[Array, "*batch"]:
+        """Make random boolean mask to hold-in data.
+        
+        Parameters
+        ----------
+        key: PRNGKeyArray
+        frac: Fraction of batch shape to hold-in. Default: 1.0, do not mask.
+
+        Returns
+        -------
+        mask: boolean array
+
+        """
+
+        batch_shape = self.full_shape[:self.batch_ndims]
+        return jr.bernoulli(key, frac, batch_shape)
+
     def _transform(self, param: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform unconstrained parameter to non-negative value."""
         return softplus_forward(param)
