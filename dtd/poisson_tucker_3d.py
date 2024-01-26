@@ -35,14 +35,14 @@ def softplus_inverse(x):
     return jnp.where(x < 20, jnp.log(jnp.expm1(x)), x)
 
 def poisson_log_prob(data: Integer[Array, "*full"],
-                     mean_rate: Float[Array, "*full"]) -> float:
+                     mean_rate: Float[Array, "*full"]) -> Float[Array, "*full"]:
     """Compute Poisson log pdf of data under the given mean rate."""
 
-    ll = jnp.sum(data * jnp.log(mean_rate))
-    ll -= jnp.sum(mean_rate)
-    ll -= jnp.sum(jsp.special.gammaln(data + 1))
+    lp = data * jnp.log(mean_rate)
+    lp -= mean_rate
+    lp -= jsp.special.gammaln(data + 1)
 
-    return ll
+    return lp
 
 class PoissonTucker(eqx.Module):
     """Three-mode Poisson Tucker class.
@@ -91,7 +91,7 @@ class PoissonTucker(eqx.Module):
                     key: PRNGKeyArray,
                     full_shape: Sequence[int],
                     core_shape: Sequence[int],
-                    event_ndims: int=1,
+                    /,
     ) -> "PoissonTucker":
         """Initialize a Poisson Tucker instance with random parameter values.
 
@@ -102,9 +102,6 @@ class PoissonTucker(eqx.Module):
         key: PRNGKeyArray
         full_shape: Sequence, corresponds to reconstructed tensor shape (d1, d2, d3)
         core_shape: Sequence, corresponds to core tensor shape (k1, k2, k3)
-        event_ndims: int, number of event dimensions. Default: 1
-            Only event_ndims = 1 is currently supported. Parameter exposed for
-            documentation purposes and the sake of being explicit.
         """
 
         tensor_mode = 3
@@ -112,14 +109,7 @@ class PoissonTucker(eqx.Module):
             raise ValueError(f"Expecting len(full_shape)={tensor_mode}, but got full_shape={full_shape}.")
 
         if len(core_shape) != tensor_mode:
-            raise ValueError(f"Expecting len(core_shape)={tensor_mode}, but got core_shape={core_shape}.")
-
-        if event_ndims != 1:
-            raise ValueError(
-                f"Only event_ndims= 1 is currently supported, but got {event_ndims}." \
-                "Dynamic event dimensioning may be explored in the future. For now," \
-                "create a new class and handle event dimensioning manually."
-            )
+            raise 
 
         key, key_ = jr.split(key)
         G_param = jr.uniform(key, shape=tuple(core_shape), minval=-5, maxval=-5)
@@ -128,9 +118,8 @@ class PoissonTucker(eqx.Module):
             for key_, F_shape in zip(jr.split(key_, tensor_mode), zip(full_shape, core_shape))
         ]
         
-        return cls(G_param, *F_params, event_ndims=event_ndims)
+        return cls(G_param, *F_params)
 
-    
     @property
     def full_shape(self,) -> Tuple[int, int, int]:
         """Shape of reconstructed tensor."""
@@ -141,6 +130,18 @@ class PoissonTucker(eqx.Module):
     def core_shape(self,) -> Tuple[int, int, int]:
         """Shape of core tensor."""
         return self.G_param.shape
+    
+    
+    @property
+    def event_ndims(self,) -> int:
+        """Number of event dimensions in reconstructed tensor. This is hard-coded in."""
+        return 0
+
+
+    @property
+    def batch_ndims(self,) -> int:
+        """Number of batch (independent) dimensions in reconstructed tensor."""
+        return len(self.full_shape) - self.event_ndims
     
 
     @property
@@ -190,80 +191,37 @@ class PoissonTucker(eqx.Module):
     
 
     def _fullbatch_log_likelihood(self,
-                                  data: Integer[Array, "*full"],) -> float:
+                                  data: Integer[Array, "*full"],
+    ) -> Float[Array, "*batch"]:
         """Compute full-batch Poisson log-likelihood under the current parameters."""
         
         mean_rate = self.reconstruct()
         return poisson_log_prob(data, mean_rate)
     
-    def _streaming_log_likelihood(self,
-                                  batch_size: int,
-                                  data: Integer[Array, "*full"],) -> float:
-        """Compute full-batch Poisson log-likelihood in a streaming way.
-
-        This is useful when one dimension is extremely large and requires a more
-        memory-efficient way of computing the log-likelihod. Note that the
-        mini-batching for the streaming computation is only taken over a single
-        axis, axis=0.
-
-        Note that this _is_ the exact log-likelihood (and not an approximation)
-        because the first axis should be a batch axis and slices are independent.
-        Therefore, the full log-likelihood can be computed in mini-batches
-        and cumulatively added together.
-
-        Parameters
-        ----------
-        TODO
-        """
-
-        raise NotImplementedError
-    
-    #     core, fctr_1, fctr_2, fctr_3, *_ = self.__call__()
-
-    #     # Define single minibatch log-likelihood
-    #     def minibatch_ll(y_m, f_1_m):
-    #         rate_m = self._full(core, f_1_m, fctr_2, fctr_3)
-    #         return poisson_log_prob(rate_m, y_m)
-
-    #     # Scan over complete minibatches 
-    #     n_batches = len(y) // batch_size
-    #     d1_full = n_batches * batch_size
-
-    #     def step(ll_mm1, start_idx):
-    #         y_m = lax.dynamic_slice_in_dim(y, start_idx, batch_size)
-    #         f_1_m = lax.dynamic_slice_in_dim(fctr_1, start_idx, batch_size)
-    #         return ll_mm1 + minibatch_ll(y_m, f_1_m), None
-        
-    #     ll, _ = lax.scan(step, 0., jnp.arange(0, d1_full, batch_size))
-
-    #     # If last batch is incomplete, calculate its log-likelihood now
-    #     ll += lax.cond((len(y) % batch_size) > 0,
-    #                    lambda y_m, f_m: minibatch_ll(y_m, f_m,),
-    #                    lambda *_: 0.,
-    #                    y[d1_full:], fctr_1[d1_full:])
-    #     return ll
-    
     def log_likelihood(self,
                        data: Integer[Array, "*full"],
-                       batch_size: int=0) -> Float[Array, "*event"]:
+                       minibatch_size: int=0,
+    ) -> Float[Array, "*batch"]:
         """Compute log likelihood of data under the model."""
         
-        if batch_size > 0:
-            return self._streaming_log_likelihood(batch_size, data)
+        if minibatch_size > 0:
+            raise NotImplementedError
         else:
             return self._fullbatch_log_likelihood(data)
         
-    def log_prior(self,) -> Float[Array, "#event"]:
+    def log_prior(self,) -> Float[Array, "#batch"]:
         """Compute log prior of parameter values."""
 
         return jnp.array(0)
     
     def log_prob(self,
                 data: Integer[Array, "*full"],
-                batch_size: int=0,
+                minibatch_size: int=0,
                 log_prior_scale: float=1.) -> Float[Array, "*event"]:
         
-        return self.log_likelihood(data, batch_size) + log_prior_scale * self.log_prior()
+        lp = self.log_likelihood(data, minibatch_size)
+        lp += log_prior_scale * self.log_prior()
+        return lp
     
 class ProjectedConvexPoissonTucker():
     pass
