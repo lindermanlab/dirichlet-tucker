@@ -1,12 +1,13 @@
 """Stochastic gradient descent."""
 
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, NamedTuple, Optional, Sequence, Tuple
 from jax._src.prng import PRNGKeyArray
-from jaxtyping import Array, Bool, Integer, PyTree
+from jaxtyping import Array, Bool, Float, Integer, PyTree
 from optax._src.base import GradientTransformation, OptState
 
 from tqdm.auto import tqdm
 
+import chex
 import equinox as eqx
 from jax import lax, vmap, value_and_grad
 import jax.numpy as jnp
@@ -14,99 +15,78 @@ from jax.tree_util import tree_map
 import optax
 
 Model = eqx.Module
+DataArray = Integer[Array, "*full"]
+MaskArray = Bool[Array, "*batch"]
+IterCallbackCallable = Callable[[float, Model, DataArray, MaskArray], PyTree]
 
-def setup_optimization(optimizer: GradientTransformation,
-                       model_klass: Model,
-                       model_full_shape: Sequence[int],
-                       model_core_shape: Sequence[int],
-                       model_init_params: dict={},
-                       iter_callback: Optional[Callable[[float, Model], PyTree]]=None,   
-                       minibatch_size: int=0,
-                       log_prior_weight: float=1.,
-                       ) -> Tuple[Callable, Callable]:
-    """Setup optimization initialization and step functions.
+@chex.dataclass
+class DefaultIterOutput:
+    """Default dataclass """
+    train_loss: Float[Array, "n"]
+    vldtn_loss: Float[Array, "n"]
+
+def _default_iter_callback(loss: float,
+                           model: Model,
+                           data: Integer[Array, "*full"],
+                           data_mask: Bool[Array, "*batch"],) -> PyTree:
+    """Default callback function for computing values at each iteration step.
     
-    Parameters
-    ----------
-    model_klass: Model class reference
-    model_full_shape: Sequence, corresponds to reconstructed tensor shape (d1, d2, d3)
-    model_core_shape: Sequence, corresponds to core tensor shape (k1, k2, k3)
-    model_init_params: dict, forwarded to model_klass.random_init
-    optimizer_klass:
-        Optax optimizer class reference; default: optax.adam
-    optimzer_schedule_klass:
-        Optax optimizer schedule class reference; default: optax.exponential_decay
+    Returns training loss and validation loss (log likelihood of held-out data).
     """
 
-    # If iter_callback not specified, default to returning the loss
-    if iter_callback is None:
-        def iter_callback(model: Model,
-                          data: Integer[Array, "*full"],
-                          data_mask: Bool[Array, "*batch"],
-                          loss: float,):
-            return jnp.asarray(loss)
-    
-    def objective_fn(model: Model,
-                     data: Integer[Array, "*full"],
-                     data_mask: Bool[Array, "*batch"],) -> float:
-        """Objective function, differentiate with respect to first argument."""
-        lp = jnp.where(data_mask, model.log_likelihood(data, minibatch_size), 0.0)
-        lp += log_prior_weight * model.log_prior()
-        lp /= data_mask.sum()
-        return -lp.sum()
-    
-    def init_fn(key: PRNGKeyArray,
-                data: Integer[Array, "*full"],
-                data_mask: Bool[Array, "*batch"],
-    ) -> Tuple[Model, OptState]:
-        
-        # Randomly initialize data
-        model = model_klass.random_init(
-            key, model_full_shape, model_core_shape, **model_init_params
-        )
+    vldtn_loss = jnp.where(~data_mask, model.log_likelihood(data), 0.0)
+    vldtn_loss /= (~data_mask).sum()
+    vldtn_loss = -vldtn_loss.sum()
 
-        # Initialize optimizer state
-        opt_state = optimizer.init(model)
+    return DefaultIterOutput(train_loss=loss, vldtn_loss=vldtn_loss)
 
-        return model, opt_state
-    
-    def step_fn(init_model: Model,
-                init_opt_state: OptState,
-                data: Integer[Array, "*full"],
-                data_mask: Bool[Array, "*batch"],
-                n_iters: int,) -> Tuple[Model, OptState, PyTree]:
-
-        def step(carry, itr):
-            model, opt_state = carry
-            loss, grads = value_and_grad(objective_fn)(model, data, data_mask)
-            
-            updates, updated_opt_state = optimizer.update(grads, opt_state, model)
-            updated_model = optax.apply_updates(model, updates)
-
-            output = iter_callback(updated_model, data, data_mask, loss)
-            return (updated_model, updated_opt_state), output
-    
-        (model, opt_state), outputs \
-            = lax.scan(step, (init_model, init_opt_state), jnp.arange(n_iters))
-        
-        return model, opt_state, outputs
-    
-    return init_fn, step_fn
-
-
-def fit_opt(key: PRNGKeyArray,
-            opt_init_fn: Callable,
-            opt_step_fn: Callable,
+def fit_opt(model: Model,
             data: Integer[Array, "*full"],
             data_mask: Bool[Array, "*batch"],
-            n_iters: int=5000):
+            objective_fn: Callable[[Model], float],
+            optimizer: GradientTransformation,
+            opt_state: OptState,
+            n_iters: int=5000,
+            iter_callback: Optional[IterCallbackCallable]=None,
+            ):
     """Fit model to data using optimizer.
     
     Model and objective are defined implicitly in `init_fn` and `step_fn`.
-    """
-    
-    init_model, init_opt_state = opt_init_fn(key, data, data_mask)
-    model, _, outputs \
-        = opt_step_fn(init_model, init_opt_state, data, data_mask, n_iters)
 
-    return model, outputs
+    Parameters
+    ----------
+    data: integer ndarray, ([bm, ..., b1], b0, [en,...,e1], e0 )
+    data_mask: boolean ndarray, ([bm, ..., b1], b0)
+        Data and fit/validation mask.
+    model: Model
+        Parameterize model to optimize
+    objective_fn: Objective function to minimize
+    optimizer: optax.GradientTransformation
+    opt_state:  optax.OptState
+        Optimizer and optimizer state
+    n_iters: int
+        Number of iterations to optimize over
+    iter_callback: Callable[[Model, data, data_mask, float], PyTree], optional
+        Callback for computing intermediate values at each iteration step.
+        If None, use `_default_iter_callback` which returns the `train_loss`
+        and `vldtn_loss`. Output _must_ have an attribute called `train_loss`.
+        This is not explicitly checked or enforced anywhere.
+    """
+
+    if iter_callback is None:
+        iter_callback = _default_iter_callback
+
+    def step(carry, itr):
+        model, opt_state = carry
+        loss, grads = value_and_grad(objective_fn)(model)
+        
+        updates, updated_opt_state = optimizer.update(grads, opt_state, model)
+        updated_model = optax.apply_updates(model, updates)
+
+        output = iter_callback(loss, updated_model, data, data_mask)
+        return (updated_model, updated_opt_state), output
+    
+    (updated_model, updated_opt_state), outputs \
+        = lax.scan(step, (model, opt_state), jnp.arange(n_iters))
+    
+    return (updated_model, updated_opt_state), outputs
