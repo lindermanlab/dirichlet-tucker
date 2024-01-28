@@ -101,12 +101,5 @@ def fit_opt(model: Model,
 
     (updated_model, updated_opt_state), outputs \
         = lax.scan(step, (model, opt_state), jnp.arange(n_iters))
-    
-    # carry = (model, opt_state)
-    # outputs = []
-    # for i in range(n_iters):
-    #     carry, output = step(carry, i)
-    #     outputs.append(output)
-    # (updated_model, updated_opt_state) = carry
 
     return (updated_model, updated_opt_state), outputs

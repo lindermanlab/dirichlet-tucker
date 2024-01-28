@@ -276,7 +276,7 @@ class PoissonTucker(eqx.Module):
         lp += log_prior_scale * self.log_prior()
         return lp
     
-
+import numpy as onp
 class MultinomialTucker(PoissonTucker):
     """Base class for Multinomial Tucker model.
     
@@ -301,7 +301,7 @@ class MultinomialTucker(PoissonTucker):
     """
 
     event_ndim: int = 1
-    scale: int = eqx.field(converter=int)
+    scale: int = eqx.field(static=True)
 
 
     def __init__(self,
@@ -314,7 +314,6 @@ class MultinomialTucker(PoissonTucker):
     ):
         super().__init__(G, F1, F2, F3)
         self.scale = int(scale)
-
 
     @classmethod
     def random_init(cls,

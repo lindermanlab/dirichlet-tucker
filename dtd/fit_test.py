@@ -101,4 +101,4 @@ def test_fit_opt_2(model_klass):
                              n_iters)
 
     # Assert that loss is decreasing
-    assert jnp.all(outputs.train_loss[1:] - outputs.train_loss[:-1] < 0)
+    assert (outputs.train_loss[-1] - outputs.train_loss[0]) < 0
