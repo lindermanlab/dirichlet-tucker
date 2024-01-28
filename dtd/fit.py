@@ -22,8 +22,9 @@ IterCallbackCallable = Callable[[float, Model, DataArray, MaskArray], PyTree]
 @chex.dataclass
 class DefaultIterOutput:
     """Default dataclass """
-    train_loss: Float[Array, "n"]
-    vldtn_loss: Float[Array, "n"]
+    loss: Float[Array, "n"]
+    train_ll: Float[Array, "n"]
+    vldtn_ll: Float[Array, "n"]
 
 
 def _default_iter_callback(loss: float,
@@ -35,11 +36,12 @@ def _default_iter_callback(loss: float,
     Returns training loss and validation loss (log likelihood of held-out data).
     """
 
-    vldtn_loss = jnp.where(~data_mask, model.log_likelihood(data), 0.0)
-    vldtn_loss /= (~data_mask).sum()
-    vldtn_loss = -vldtn_loss.sum()
+    ll = model.log_likelihood(data)
 
-    return DefaultIterOutput(train_loss=loss, vldtn_loss=vldtn_loss)
+    train_ll = (jnp.where(data_mask, ll, 0.0) / data_mask.sum()).sum()
+    vldtn_ll = (jnp.where(~data_mask, ll, 0.0) / (~data_mask).sum()).sum()
+
+    return DefaultIterOutput(loss=loss, train_ll=train_ll, vldtn_ll=vldtn_ll)
 
 
 def fit_opt(model: Model,
