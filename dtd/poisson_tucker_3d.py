@@ -78,12 +78,21 @@ class PoissonTucker(eqx.Module):
 
     All shape annotations assume `batch_dims=(d1, d2)`, `event_dims=(d3,)`.
 
-    Parameters
+    Attributes
     ----------
-    *params: Sequence[Float[Array. "..."]]
-    event_ndim: int, number of event dimensions. Default: 1
-        Only event_ndim = 1 is currently supported. Parameter exposed for
-        documentation purposes and the sake of being explicit.
+    G_param: float array, shape (k1, k2, k3)
+    F1_param: float array, shape (d1, k1)
+    F2_param: float array, shape (d2, k2)
+    F3_param: float array, shape (d3, k3)
+        Unconstrained parameterization of the core tensor and factor matrices
+        of a 3-mode non-negative Tucker decomposition.
+    
+    Static attributes
+    -----------------
+    event_ndim: int
+        Dimension of a single draw from the distribution. A property of the
+        distribution; Poisson distribution event_ndim = 0.
+
     """
 
     G_param: Float[Array, "k1 k2 k3"]
@@ -91,7 +100,6 @@ class PoissonTucker(eqx.Module):
     F2_param: Float[Array, "d2 k2"]
     F3_param: Float[Array, "d3 k3"]
 
-    # Static attributes, controlled by non-jax arrays
     event_ndim: int = 0
 
     def __init__(self,
@@ -107,6 +115,18 @@ class PoissonTucker(eqx.Module):
         self.F1_param = F1_param
         self.F2_param = F2_param
         self.F3_param = F3_param
+    
+
+    @classmethod
+    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform unconstrained parameter to non-negative value."""
+        return softplus_forward(param)
+
+
+    @classmethod
+    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform non-negative value to unconstrained parameter."""
+        return softplus_inverse(val)
     
 
     @classmethod
@@ -143,6 +163,7 @@ class PoissonTucker(eqx.Module):
         params = jax.tree_util.tree_map(cls._transform, (G_param, *F_params))
         
         return cls(*params)
+
 
     @property
     def full_shape(self,) -> Tuple[int, int, int]:
@@ -183,18 +204,6 @@ class PoissonTucker(eqx.Module):
 
         batch_shape = self.full_shape[:self.batch_ndims]
         return jr.bernoulli(key, frac, batch_shape)
-
-
-    @classmethod
-    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform unconstrained parameter to non-negative value."""
-        return softplus_forward(param)
-
-
-    @classmethod
-    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform non-negative value to unconstrained parameter."""
-        return softplus_inverse(val)
     
 
     def reconstruct(self,) -> Float[Array, "*full"]:
@@ -223,6 +232,7 @@ class PoissonTucker(eqx.Module):
         Returns
         -------
         samples: shape (*sample_shape, *full)
+
         """
         
         mean_rate = self.reconstruct()
@@ -266,22 +276,33 @@ class PoissonTucker(eqx.Module):
         lp += log_prior_scale * self.log_prior()
         return lp
     
+
 class MultinomialTucker(PoissonTucker):
     """Base class for Multinomial Tucker model.
     
-    Parameters
+    Attributes
     ----------
     G_param: ndarray, shape (k1, k2, k3)
     F1_param: ndarray, shape (d1, k1)
     F2_param: ndarray, shape (d2, k2)
     F3_param: ndarray, shape (d3, k3)
-        Tucker decomposition parameters, in unconstrained parameter space.
+        Unconstrained parameterization of the core tensor and factor matrices
+        of a 3-mode non-negative Tucker decomposition.    
+
+    Static attributes
+    -----------------
+    event_ndim: int, number of event dimensions.
+        Dimension of a single draw from the distribution. A property of the
+        distribution; Multivariate distribution event_ndim = 1.
     scale: int
-        Constant number that data sums up to along simplex-normalized axes.
+        Number of trials in a Multinomial distribution. Samples from the
+        distribution sum to this value along the simplex-normalized axes.
+
     """
 
-    scale: int = eqx.field(converter=int)
     event_ndim: int = 1
+    scale: int = eqx.field(converter=int)
+
 
     def __init__(self,
                  G: Float[Array, "k1 k2 k3"],
@@ -304,9 +325,9 @@ class MultinomialTucker(PoissonTucker):
                     /,
                     alpha: float=0.9
     ):
-        """Initialize a Soft Convex Poisson Tucker instance from Dirichlet prior.
+        """Initialize parameters as draws a Dirichlet prior.
 
-        (Unconstrained) parameters are sampled from Uniform(-5, 5).
+        These inital parameters are inherently simplex-normalized.
         
         Parameters
         ----------
@@ -314,9 +335,9 @@ class MultinomialTucker(PoissonTucker):
         full_shape: Sequence, corresponds to reconstructed tensor shape (d1, d2, d3)
         core_shape: Sequence, corresponds to core tensor shape (k1, k2, k3)
         scale: int
-            The value that they're all matching...
+            Number of trials in a Multinomial distribution. 
         alpha: float
-            Prior concentration for all parameters
+            Concentration of Dirichlet prior. Default: 0.9, sparse prior.
         """
 
         tensor_mode = 3
@@ -355,11 +376,37 @@ class MultinomialTucker(PoissonTucker):
     
 
 class ProjectedSimplexPoissonTucker():
+    """Multinomial Tucker model with parameters normalized post-hoc."""
+
     pass
 
 
 class L2PenalizedMultinomialTucker(MultinomialTucker):
-    """Multinomial Tucker model with L2 penalty on simplex normality of parameters."""
+    """Multinomial Tucker model with L2 penalty on simplex normality of parameters.
+    
+    The L2 penalty is applied by overloading the `log_prior` function. In this
+    sense, this model can also be viewed as placing a Gaussian prior over the
+    the event axes with a mean sum of 1.
+
+    Attributes
+    ----------
+    G_param: ndarray, shape (k1, k2, k3)
+    F1_param: ndarray, shape (d1, k1)
+    F2_param: ndarray, shape (d2, k2)
+    F3_param: ndarray, shape (d3, k3)
+        Unconstrained parameterization of the core tensor and factor matrices
+        of a 3-mode non-negative Tucker decomposition.    
+
+    Static attributes
+    -----------------
+    event_ndim: int, number of event dimensions.
+        Dimension of a single draw from the distribution. A property of the
+        distribution; Multivariate distribution event_ndim = 1.
+    scale: int
+        Number of trials in a Multinomial distribution. Samples from the
+        distribution sum to this value along the simplex-normalized axes.
+
+    """
     
     
     def log_prior(self,) -> Float[Array, "#batch"]:
@@ -368,14 +415,14 @@ class L2PenalizedMultinomialTucker(MultinomialTucker):
         G, F1, F2, F3 = jax.tree_util.tree_map(self._transform, self.params)
         
         # Event mode fibers of core should sum to 1
-        penalty = (jnp.linalg.norm(1 - G.sum(axis=2))**2).mean()
+        penalty = (-0.5*jnp.linalg.norm(1 - G.sum(axis=2))**2).mean()
 
         # Rows of batch factors should sum to 1
-        penalty += (jnp.linalg.norm(1 - F1.sum(axis=1))**2).mean()
-        penalty += (jnp.linalg.norm(1 - F2.sum(axis=1))**2).mean()
+        penalty += (-0.5*jnp.linalg.norm(1 - F1.sum(axis=1))**2).mean()
+        penalty += (-0.5*jnp.linalg.norm(1 - F2.sum(axis=1))**2).mean()
 
         # Columns of event factors should sum to 1
-        penalty += (jnp.linalg.norm(1 - F3.sum(axis=0))**2).mean()
+        penalty += (-0.5*jnp.linalg.norm(1 - F3.sum(axis=0))**2).mean()
 
         return penalty
 
@@ -388,8 +435,27 @@ class SimplexMultinomialTucker(MultinomialTucker):
     This transform ensures that the parameter values are positive _and_
     sum to 1, in contrast to other models using softplus transform which only
     guarantees that the parameter values are nonnegative.
+
+    Attributes
+    ----------
+    G_param: ndarray, shape (k1, k2, k3)
+    F1_param: ndarray, shape (d1, k1)
+    F2_param: ndarray, shape (d2, k2)
+    F3_param: ndarray, shape (d3, k3)
+        Unconstrained parameterization of the core tensor and factor matrices
+        of a 3-mode non-negative Tucker decomposition.    
+
+    Static attributes
+    -----------------
+    event_ndim: int, number of event dimensions.
+        Dimension of a single draw from the distribution. A property of the
+        distribution; Multivariate distribution event_ndim = 1.
+    scale: int
+        Number of trials in a Multinomial distribution. Samples from the
+        distribution sum to this value along the simplex-normalized axes.
     """
 
+    # Axes of each parameter that is simplex-constrained
     _param_simplex_axes: tuple = (2, 1, 1, 0)
 
     def __init__(self,
@@ -399,6 +465,7 @@ class SimplexMultinomialTucker(MultinomialTucker):
                  F3: Float[Array, "d3 k3"],
                  scale: int,
     ):
+        """Redfine __init__ because we need to pass args into the inverse transform."""
         G_param, F1_param, F2_param, F3_param = jax.tree_util.tree_map(
             self._inverse_transform, (G, F1, F2, F3), self._param_simplex_axes
         )
