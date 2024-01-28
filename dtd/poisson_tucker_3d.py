@@ -109,7 +109,7 @@ class PoissonTucker(eqx.Module):
                  F3: Float[Array, "d3 k3"],
     ):
         G_param, F1_param, F2_param, F3_param \
-            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
+            = self.params_from_vals(G, F1, F2, F3)
         
         self.G_param = G_param
         self.F1_param = F1_param
@@ -128,6 +128,11 @@ class PoissonTucker(eqx.Module):
         """Transform non-negative value to unconstrained parameter."""
         return softplus_inverse(val)
     
+
+    @classmethod
+    def params_from_vals(cls, *vals) -> tuple:
+        return jax.tree_util.tree_map(cls._inverse_transform, vals)
+
 
     @classmethod
     def random_init(cls,
@@ -186,6 +191,11 @@ class PoissonTucker(eqx.Module):
     @property
     def params(self,) -> tuple:
         return self.G_param, self.F1_param, self.F2_param, self.F3_param
+
+
+    @property
+    def factors(self,) -> tuple:
+        return jax.tree_util.tree_map(self._transform, self.params)
     
 
     def random_mask(self, key: PRNGKeyArray, frac: float=1.0) -> Bool[Array, "*batch"]:
@@ -209,7 +219,7 @@ class PoissonTucker(eqx.Module):
     def reconstruct(self,) -> Float[Array, "*full"]:
         """Reconstruct mean rate from parameterized decomposition."""
 
-        G, F1, F2, F3 = jax.tree_util.tree_map(self._transform, self.params)
+        G, F1, F2, F3 = self.factors
         
         tnsr = jnp.einsum('zc, abc-> abz', F3, G)
         tnsr = jnp.einsum('yb, abz-> ayz', F2, tnsr)
@@ -276,7 +286,7 @@ class PoissonTucker(eqx.Module):
         lp += log_prior_scale * self.log_prior()
         return lp
     
-import numpy as onp
+
 class MultinomialTucker(PoissonTucker):
     """Base class for Multinomial Tucker model.
     
@@ -314,6 +324,7 @@ class MultinomialTucker(PoissonTucker):
     ):
         super().__init__(G, F1, F2, F3)
         self.scale = int(scale)
+
 
     @classmethod
     def random_init(cls,
@@ -411,7 +422,7 @@ class L2PenalizedMultinomialTucker(MultinomialTucker):
     def log_prior(self,) -> Float[Array, "#batch"]:
         """Apply L2 regularization on parameters to be simplex constrained."""
         
-        G, F1, F2, F3 = jax.tree_util.tree_map(self._transform, self.params)
+        G, F1, F2, F3 = self.factors
         
         # Event mode fibers of core should sum to 1
         penalty = (-0.5*jnp.linalg.norm(1 - G.sum(axis=2))**2).mean()
@@ -456,25 +467,6 @@ class SimplexMultinomialTucker(MultinomialTucker):
 
     # Axes of each parameter that is simplex-constrained
     _param_simplex_axes: tuple = (2, 1, 1, 0)
-
-    def __init__(self,
-                 G: Float[Array, "k1 k2 k3"],
-                 F1: Float[Array, "d1 k1"],
-                 F2: Float[Array, "d2 k2"],
-                 F3: Float[Array, "d3 k3"],
-                 scale: int,
-    ):
-        """Redfine __init__ because we need to pass args into the inverse transform."""
-        G_param, F1_param, F2_param, F3_param = jax.tree_util.tree_map(
-            self._inverse_transform, (G, F1, F2, F3), self._param_simplex_axes
-        )
-        
-        self.G_param = G_param
-        self.F1_param = F1_param
-        self.F2_param = F2_param
-        self.F3_param = F3_param
-
-        self.scale = int(scale)
     
     @classmethod
     def _transform(cls,
@@ -493,19 +485,11 @@ class SimplexMultinomialTucker(MultinomialTucker):
         return softmax_inverse(val, axis=axis)
 
 
-    def reconstruct(self,):
-        """Reconstruct mean rate from parameterized decomposition.
-        
-        Modified from parent class to explicitly account for which axis that
-        the simplex constraint is applied to.
-        """
+    @classmethod
+    def params_from_vals(cls, *vals) -> tuple:
+        return jax.tree_util.tree_map(cls._inverse_transform, vals, cls._param_simplex_axes)
 
-        G, F1, F2, F3 = jax.tree_util.tree_map(
-            self._transform, self.params, self._param_simplex_axes
-        )
-        
-        tnsr = jnp.einsum('zc, abc-> abz', F3, G)
-        tnsr = jnp.einsum('yb, abz-> ayz', F2, tnsr)
-        tnsr = jnp.einsum('xa, ayz-> xyz', F1, tnsr)
-    
-        return self.scale * tnsr
+
+    @property
+    def factors(self,) -> tuple:
+        return jax.tree_util.tree_map(self._transform, self.params, self._param_simplex_axes)
