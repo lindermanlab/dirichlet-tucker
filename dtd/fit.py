@@ -25,6 +25,7 @@ class DefaultIterOutput:
     train_loss: Float[Array, "n"]
     vldtn_loss: Float[Array, "n"]
 
+
 def _default_iter_callback(loss: float,
                            model: Model,
                            data: Integer[Array, "*full"],
@@ -39,6 +40,7 @@ def _default_iter_callback(loss: float,
     vldtn_loss = -vldtn_loss.sum()
 
     return DefaultIterOutput(train_loss=loss, vldtn_loss=vldtn_loss)
+
 
 def fit_opt(model: Model,
             data: Integer[Array, "*full"],
@@ -76,17 +78,35 @@ def fit_opt(model: Model,
     if iter_callback is None:
         iter_callback = _default_iter_callback
 
+    def _objective_fn(model_params, model_fields):
+        model = eqx.combine(model_params, model_fields)
+        return objective_fn(model)
+    
     def step(carry, itr):
         model, opt_state = carry
-        loss, grads = value_and_grad(objective_fn)(model)
+
+        # Split the model into updateable params and static fields
+        model_params, model_static_fields = eqx.partition(model, eqx.is_array)
         
+        # Compute gradients and apply updates
+        loss, grads = value_and_grad(_objective_fn)(model_params, model_static_fields)
         updates, updated_opt_state = optimizer.update(grads, opt_state, model)
-        updated_model = optax.apply_updates(model, updates)
+        updated_model_params = optax.apply_updates(model_params, updates)
+
+        # Recombine the updated model parameters with the static fields
+        updated_model = eqx.combine(updated_model_params, model_static_fields)
 
         output = iter_callback(loss, updated_model, data, data_mask)
         return (updated_model, updated_opt_state), output
-    
+
     (updated_model, updated_opt_state), outputs \
         = lax.scan(step, (model, opt_state), jnp.arange(n_iters))
     
+    # carry = (model, opt_state)
+    # outputs = []
+    # for i in range(n_iters):
+    #     carry, output = step(carry, i)
+    #     outputs.append(output)
+    # (updated_model, updated_opt_state) = carry
+
     return (updated_model, updated_opt_state), outputs
