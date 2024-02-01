@@ -7,8 +7,9 @@ import optax
 
 from dtd.poisson_tucker_3d import (
     PoissonTucker,
-    L2PenalizedMultinomialTucker,
-    SimplexMultinomialTucker,
+    ProjectedPoissonTucker,
+    L2PenalizedPoissonTucker,
+    SimplexPoissonTucker,
 )
 
 from dtd.fit import fit_opt
@@ -57,8 +58,9 @@ def test_fit_opt(
     assert jnp.all(outputs.train_loss[1:] - outputs.train_loss[:-1] < 0)
 
 @pytest.mark.parametrize("model_klass", [
-    L2PenalizedMultinomialTucker,
-    SimplexMultinomialTucker,
+    ProjectedPoissonTucker,
+    L2PenalizedPoissonTucker,
+    SimplexPoissonTucker,
 ])
 def test_fit_opt_2(model_klass):  
     optimizer=optax.adam(1e-1)

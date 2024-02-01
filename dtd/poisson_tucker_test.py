@@ -6,8 +6,9 @@ import optax
 
 from dtd.poisson_tucker_3d import (
     PoissonTucker,
-    L2PenalizedMultinomialTucker,
-    SimplexMultinomialTucker
+    ProjectedPoissonTucker,
+    L2PenalizedPoissonTucker,
+    SimplexPoissonTucker
 )
 
 def test_poisson_tucker(full_shape=(10,8,5),
@@ -30,10 +31,11 @@ def test_poisson_tucker(full_shape=(10,8,5),
     assert jnp.all(jnp.isfinite(lp))
 
 @pytest.mark.parametrize("model_klass", [
-    L2PenalizedMultinomialTucker,
-    SimplexMultinomialTucker,
+    ProjectedPoissonTucker,
+    L2PenalizedPoissonTucker,
+    SimplexPoissonTucker,
 ])
-def test_multinomial_tucker(model_klass):
+def test_constrained_poisson_tucker(model_klass):
     
     key = jr.PRNGKey(0)
     key_init, key_sample = jr.split(key)

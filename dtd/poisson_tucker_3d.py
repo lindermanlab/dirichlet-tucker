@@ -115,24 +115,20 @@ class PoissonTucker(eqx.Module):
         self.F1_param = F1_param
         self.F2_param = F2_param
         self.F3_param = F3_param
-    
 
     @classmethod
     def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform unconstrained parameter to non-negative value."""
         return softplus_forward(param)
 
-
     @classmethod
     def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform non-negative value to unconstrained parameter."""
         return softplus_inverse(val)
-    
 
     @classmethod
     def params_from_vals(cls, *vals) -> tuple:
         return jax.tree_util.tree_map(cls._inverse_transform, vals)
-
 
     @classmethod
     def random_init(cls,
@@ -169,35 +165,29 @@ class PoissonTucker(eqx.Module):
         
         return cls(*params)
 
-
     @property
     def full_shape(self,) -> Tuple[int, int, int]:
         """Shape of reconstructed tensor."""
         return tuple([len(f) for f in [self.F1_param, self.F2_param, self.F3_param]])
     
-
     @property
     def core_shape(self,) -> Tuple[int, int, int]:
         """Shape of core tensor."""
         return self.G_param.shape
-
 
     @property
     def batch_ndims(self,) -> int:
         """Number of batch (independent) dimensions in reconstructed tensor."""
         return len(self.full_shape) - self.event_ndim
     
-
     @property
     def params(self,) -> tuple:
         return self.G_param, self.F1_param, self.F2_param, self.F3_param
-
 
     @property
     def factors(self,) -> tuple:
         return jax.tree_util.tree_map(self._transform, self.params)
     
-
     def random_mask(self, key: PRNGKeyArray, frac: float=1.0) -> Bool[Array, "*batch"]:
         """Make random boolean mask to hold-in data.
         
@@ -215,7 +205,6 @@ class PoissonTucker(eqx.Module):
         batch_shape = self.full_shape[:self.batch_ndims]
         return jr.bernoulli(key, frac, batch_shape)
     
-
     def reconstruct(self,) -> Float[Array, "*full"]:
         """Reconstruct mean rate from parameterized decomposition."""
 
@@ -227,7 +216,6 @@ class PoissonTucker(eqx.Module):
 
         return tnsr
 
-        
     def sample(self,
                key: PRNGKeyArray,
                sample_shape: tuple=(),
@@ -249,7 +237,6 @@ class PoissonTucker(eqx.Module):
 
         return jr.poisson(key, mean_rate, shape=(*sample_shape, *self.full_shape))
     
-
     def _fullbatch_log_likelihood(self,
                                   data: Integer[Array, "*full"],
     ) -> Float[Array, "*batch"]:
@@ -258,7 +245,6 @@ class PoissonTucker(eqx.Module):
         mean_rate = self.reconstruct()
         return poisson_log_prob(data, mean_rate)
     
-
     def log_likelihood(self,
                        data: Integer[Array, "*full"],
                        minibatch_size: int=0,
@@ -270,13 +256,11 @@ class PoissonTucker(eqx.Module):
         else:
             return self._fullbatch_log_likelihood(data)
         
-
     def log_prior(self,) -> Float[Array, "#batch"]:
         """Compute log prior of parameter values."""
 
         return jnp.array(0)
     
-
     def log_prob(self,
                 data: Integer[Array, "*full"],
                 minibatch_size: int=0,
@@ -287,7 +271,7 @@ class PoissonTucker(eqx.Module):
         return lp
     
 
-class MultinomialTucker(PoissonTucker):
+class ScaledPoissonTucker(PoissonTucker):
     """Base class for Multinomial Tucker model.
     
     Attributes
@@ -304,6 +288,8 @@ class MultinomialTucker(PoissonTucker):
     event_ndim: int, number of event dimensions.
         Dimension of a single draw from the distribution. A property of the
         distribution; Multivariate distribution event_ndim = 1.
+    normalized_axes: tuple
+        Axis of each parameter that is constrained / penalized to be one
     scale: int
         Number of trials in a Multinomial distribution. Samples from the
         distribution sum to this value along the simplex-normalized axes.
@@ -311,8 +297,8 @@ class MultinomialTucker(PoissonTucker):
     """
 
     event_ndim: int = 1
-    scale: int = eqx.field(static=True)
-
+    normalized_axes: tuple = (2, 1, 1, 0)
+    scale: int = eqx.static_field()  # Replace with `eqx.field(static=True)` for equinox version >= 0.10.5
 
     def __init__(self,
                  G: Float[Array, "k1 k2 k3"],
@@ -324,7 +310,6 @@ class MultinomialTucker(PoissonTucker):
     ):
         super().__init__(G, F1, F2, F3)
         self.scale = int(scale)
-
 
     @classmethod
     def random_init(cls,
@@ -369,12 +354,10 @@ class MultinomialTucker(PoissonTucker):
         
         return cls(G, F1, F2, F3, scale,)
     
-    
     def reconstruct(self,):
         tnsr = super().reconstruct()
         return self.scale * tnsr
     
-
     def _fullbatch_log_likelihood(self,
                                   data: Integer[Array, "*full"],
                                  ) -> Float[Array, "*batch"]:
@@ -384,15 +367,24 @@ class MultinomialTucker(PoissonTucker):
         return ll.sum(axis=-1)
     
     
+class ProjectedPoissonTucker(ScaledPoissonTucker):
+    """Scaled Poisson Tucker model with parameters normalized post-hoc."""
 
-class ProjectedSimplexPoissonTucker():
-    """Multinomial Tucker model with parameters normalized post-hoc."""
+    @property
+    def factors(self,) -> tuple:
+        G, F1, F2, F3 = super().factors
+        g_axis, f1_axis, f2_axis, f3_axis = self.normalized_axes
 
-    pass
+        projected_factors = jax.tree_util.tree_map(
+            lambda fctr, axis: fctr / fctr.sum(axis=axis, keepdims=True),
+            super().factors, self.normalized_axes
+        )
+
+        return projected_factors
 
 
-class L2PenalizedMultinomialTucker(MultinomialTucker):
-    """Multinomial Tucker model with L2 penalty on simplex normality of parameters.
+class L2PenalizedPoissonTucker(ScaledPoissonTucker):
+    """Scaled Poisson Tucker Tucker model with L2 penalty on simplex normality of parameters.
     
     The L2 penalty is applied by overloading the `log_prior` function. In this
     sense, this model can also be viewed as placing a Gaussian prior over the
@@ -418,26 +410,20 @@ class L2PenalizedMultinomialTucker(MultinomialTucker):
 
     """
     
-    
     def log_prior(self,) -> Float[Array, "#batch"]:
         """Apply L2 regularization on parameters to be simplex constrained."""
         
-        G, F1, F2, F3 = self.factors
+        penalty = jnp.asarray(
+            jax.tree_util.tree_map(
+                lambda fctr, axis: (-0.5*jnp.linalg.norm(1 - fctr.sum(axis=axis))**2).mean(),
+                self.factors, self.normalized_axes
+            )
+        )
         
-        # Event mode fibers of core should sum to 1
-        penalty = (-0.5*jnp.linalg.norm(1 - G.sum(axis=2))**2).mean()
-
-        # Rows of batch factors should sum to 1
-        penalty += (-0.5*jnp.linalg.norm(1 - F1.sum(axis=1))**2).mean()
-        penalty += (-0.5*jnp.linalg.norm(1 - F2.sum(axis=1))**2).mean()
-
-        # Columns of event factors should sum to 1
-        penalty += (-0.5*jnp.linalg.norm(1 - F3.sum(axis=0))**2).mean()
-
-        return penalty
+        return penalty.sum()
 
 
-class SimplexMultinomialTucker(MultinomialTucker):
+class SimplexPoissonTucker(ScaledPoissonTucker):
     """Multinomial Tucker model with simplex-constrained factors.
 
     Factors transformed from uncostrained to constrained simplex space via
@@ -464,9 +450,6 @@ class SimplexMultinomialTucker(MultinomialTucker):
         Number of trials in a Multinomial distribution. Samples from the
         distribution sum to this value along the simplex-normalized axes.
     """
-
-    # Axes of each parameter that is simplex-constrained
-    _param_simplex_axes: tuple = (2, 1, 1, 0)
     
     @classmethod
     def _transform(cls,
@@ -484,12 +467,10 @@ class SimplexMultinomialTucker(MultinomialTucker):
         """Transform non-negative value to unconstrained parameter."""
         return softmax_inverse(val, axis=axis)
 
-
     @classmethod
     def params_from_vals(cls, *vals) -> tuple:
-        return jax.tree_util.tree_map(cls._inverse_transform, vals, cls._param_simplex_axes)
-
+        return jax.tree_util.tree_map(cls._inverse_transform, vals, cls.normalized_axes)
 
     @property
     def factors(self,) -> tuple:
-        return jax.tree_util.tree_map(self._transform, self.params, self._param_simplex_axes)
+        return jax.tree_util.tree_map(self._transform, self.params, self.normalized_axes)
