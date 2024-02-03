@@ -1,17 +1,74 @@
 from __future__ import annotations
-from typing import Optional, Union
-from jaxtyping import Array
+from typing import Optional, Sequence, Tuple, Union
+from jax._src.prng import PRNGKeyArray
+from jaxtyping import Array, Bool, Float, Integer
 
 import itertools
 from pathlib import Path
 import shutil
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as onp
 
 import pandas as pd
 import wandb
+
+
+
+def softplus_forward(log_x: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
+    """Elementwise transform unconstrained value to non-negative values via softplus."""
+    return jax.nn.softplus(log_x)
+
+
+def softplus_inverse(x: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
+    """Elementwise transform non-negative values to unconstrained values via inverse-softplus.
+    
+    Catch overflow: when values are large (i.e. x >= 20), log(exp(x)-1) ~= x.
+    """
+    return jnp.where(x < 20, jnp.log(jnp.expm1(x)), x)
+
+
+def softmax_forward(
+        log_x: Float[Array, "*shape"],
+        axis: Union[int, Sequence[int]]=-1,
+) -> Float[Array, "*shape"]:
+    """Transform unconstrained vector to satisfy simplex constraints along `axis`.
+    
+    `axis` can be an int or a tuple of ints.
+    """
+    return jax.nn.softmax(log_x, axis=axis)
+
+
+def softmax_inverse(
+        x: Float[Array, "*shape"],
+        axis: Union[int, Sequence[int]]=-1,
+) -> Float[Array, "*shape"]:
+    """Transform non-negative vectors to unconstrained values centered along mean of `axis`.
+
+    `axis` can be an int or a tuple of ints.
+    """
+    log_x = jnp.log(x)
+    return log_x - log_x.mean(axis=axis, keepdims=True)
+
+
+def make_data_mask(self, key: PRNGKeyArray, shape: tuple, frac: float=1.0) -> Bool[Array, "*shape"]:
+    """Make random boolean mask to hold-in data.
+    
+    Parameters
+    ----------
+    key: PRNGKeyArray
+    shape: tuple
+    frac: Fraction of batch shape to hold-in. Default: 1.0, do not mask.
+
+    Returns
+    -------
+    mask: boolean array
+
+    """
+
+    return jr.bernoulli(key, frac, batch_shape)
 
 def calculate_minibatch_size(d1,d2,d3,k1,k2,k3,mem_gb,mem_frac=0.75):
     """Calculate minibatch size that maximizes available memory.

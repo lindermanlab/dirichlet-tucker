@@ -15,57 +15,156 @@ import jax.numpy as jnp
 import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 
+from dtd.utils import softmax_forward, softmax_inverse, softplus_forward, softplus_inverse
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
 
+class BaseTucker(eqx.Module):
+    """Three-mode Tucker decomposition base class.
 
-def softplus_forward(log_x: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
-    """Elementwise transform unconstrained value to non-negative values via softplus."""
-    return jax.nn.softplus(log_x)
+    All shape annotations assume `batch_dims=(d1, d2)`, `event_dims=(d3,)`.
 
-
-def softplus_inverse(x: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
-    """Elementwise transform non-negative values to unconstrained values via inverse-softplus.
+    Attributes
+    ----------
+    G_param: float array, shape (k1, k2, k3)
+    F1_param: float array, shape (d1, k1)
+    F2_param: float array, shape (d2, k2)
+    F3_param: float array, shape (d3, k3)
+        Unconstrained parameterization of the core tensor and factor matrices
+        of a 3-mode non-negative Tucker decomposition.
     
-    Catch overflow: when values are large (i.e. x >= 20), log(exp(x)-1) ~= x.
+    Static attributes
+    -----------------
+    event_ndim: int
+        Dimension of a single draw from the distribution. A property of the
+        distribution; Poisson distribution event_ndim = 0.
+    tensor_mode: int
+        Tensor mode, hard-coded to 3 modes.
+
     """
-    return jnp.where(x < 20, jnp.log(jnp.expm1(x)), x)
 
+    G_param: Float[Array, "k1 k2 k3"]
+    F1_param: Float[Array, "d1 k1"]
+    F2_param: Float[Array, "d2 k2"]
+    F3_param: Float[Array, "d3 k3"]
 
-def softmax_forward(
-        log_x: Float[Array, "*shape"],
-        axis: Union[int, Sequence[int]]=-1,
-) -> Float[Array, "*shape"]:
-    """Transform unconstrained vector to satisfy simplex constraints along `axis`.
+    event_ndim: int = 0
+    tensor_mode: int = 3
+
+    @classmethod
+    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform unconstrained parameter to non-negative value."""
+        raise NotImplementedError
+
+    @classmethod
+    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform non-negative value to unconstrained parameter."""
+        raise NotImplementedError
+
+    @classmethod
+    def sample_factors(cls,
+                       key: PRNGKeyArray,
+                       full_shape: Sequence[int],
+                       core_shape: Sequence[int],
+                       *args, **kwargs,
+    ):
+        raise NotImplementedError
+                    
+    @classmethod
+    def random_init(cls,
+                    key: PRNGKeyArray,
+                    full_shape: Sequence[int],
+                    core_shape: Sequence[int],
+                    *args, **kwargs,
+    ):
+        
+        raise NotImplementedError
+
+    @property
+    def full_shape(self,) -> Tuple[int, int, int]:
+        """Shape of reconstructed tensor."""
+        return tuple([len(f) for f in [self.F1_param, self.F2_param, self.F3_param]])
     
-    `axis` can be an int or a tuple of ints.
-    """
-    return jax.nn.softmax(log_x, axis=axis)
+    @property
+    def core_shape(self,) -> Tuple[int, int, int]:
+        """Shape of core tensor."""
+        return self.G_param.shape
 
+    @property
+    def batch_ndims(self,) -> int:
+        """Number of batch (independent) dimensions in reconstructed tensor."""
+        return len(self.full_shape) - self.event_ndim
+    
+    @property
+    def params(self,) -> tuple:
+        return self.G_param, self.F1_param, self.F2_param, self.F3_param
 
-def softmax_inverse(
-        x: Float[Array, "*shape"],
-        axis: Union[int, Sequence[int]]=-1,
-) -> Float[Array, "*shape"]:
-    """Transform non-negative vectors to unconstrained values centered along mean of `axis`.
+    @property
+    def factors(self,) -> tuple:
+        return jax.tree_util.tree_map(self._transform, self.params)
+    
+    def reconstruct(self,) -> Float[Array, "*full"]:
+        """Reconstruct mean rate from parameterized decomposition."""
 
-    `axis` can be an int or a tuple of ints.
-    """
-    log_x = jnp.log(x)
-    return log_x - log_x.mean(axis=axis, keepdims=True)
+        G, F1, F2, F3 = self.factors
+        
+        tnsr = jnp.einsum('zc, abc-> abz', F3, G)
+        tnsr = jnp.einsum('yb, abz-> ayz', F2, tnsr)
+        tnsr = jnp.einsum('xa, ayz-> xyz', F1, tnsr)
 
+        return tnsr
 
-def poisson_log_prob(data: Integer[Array, "*shape"],
-                     mean_rate: Float[Array, "*shape"]) -> Float[Array, "*shape"]:
-    """Compute Poisson log pdf of data under the given mean rate."""
+    def sample(self,
+               key: PRNGKeyArray,
+               sample_shape: tuple=(),
+    ) -> Integer[Array, "..."]:
+        """Sample a data tensor from the parameterized decompositions.
+        
+        Parameters
+        ----------
+        key: PRNGKeyArray
+        sample_shape: tuple, result shape
 
-    lp = data * jnp.log(mean_rate)
-    lp -= mean_rate
-    lp -= jax.scipy.special.gammaln(data + 1)
+        Returns
+        -------
+        samples: shape (*sample_shape, *full)
 
-    return lp
+        """
+        
+        raise NotImplementedError
+    
+    def _fullbatch_log_likelihood(self,
+                                  data: Integer[Array, "*full"],
+    ) -> Float[Array, "*batch"]:
+        """Compute full-batch Poisson log-likelihood under the current parameters."""
+        
+        raise NotImplementedError
+    
+    def log_likelihood(self,
+                       data: Integer[Array, "*full"],
+                       minibatch_size: int=0,
+    ) -> Float[Array, "*batch"]:
+        """Compute log likelihood of data under the model."""
+        
+        if minibatch_size > 0:
+            raise NotImplementedError
+        else:
+            return self._fullbatch_log_likelihood(data)
+        
+    def log_prior(self,) -> Float[Array, "#batch"]:
+        """Compute log prior of parameter values."""
 
+        raise NotImplementedError
+    
+    def log_prob(self,
+                data: Integer[Array, "*full"],
+                minibatch_size: int=0,
+                log_prior_scale: float=1.) -> Float[Array, "*batch"]:
+        
+        lp = self.log_likelihood(data, minibatch_size)
+        lp += log_prior_scale * self.log_prior()
+        return lp
 
 class PoissonTucker(eqx.Module):
     """Three-mode Poisson Tucker class.
@@ -92,6 +191,8 @@ class PoissonTucker(eqx.Module):
     event_ndim: int
         Dimension of a single draw from the distribution. A property of the
         distribution; Poisson distribution event_ndim = 0.
+    tensor_mode: int
+        Tensor mode, hard-coded to 3 modes.
 
     """
 
@@ -101,6 +202,7 @@ class PoissonTucker(eqx.Module):
     F3_param: Float[Array, "d3 k3"]
 
     event_ndim: int = 0
+    tensor_mode: int = 3
 
     def __init__(self,
                  G: Float[Array, "k1 k2 k3"],
@@ -109,7 +211,7 @@ class PoissonTucker(eqx.Module):
                  F3: Float[Array, "d3 k3"],
     ):
         G_param, F1_param, F2_param, F3_param \
-            = self.params_from_vals(G, F1, F2, F3)
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
         
         self.G_param = G_param
         self.F1_param = F1_param
@@ -127,14 +229,34 @@ class PoissonTucker(eqx.Module):
         return softplus_inverse(val)
 
     @classmethod
-    def params_from_vals(cls, *vals) -> tuple:
-        return jax.tree_util.tree_map(cls._inverse_transform, vals)
+    def sample_factors(cls,
+                       key: PRNGKeyArray,
+                       full_shape: Sequence[int],
+                       core_shape: Sequence[int],
+                       alpha: float=0.1,
+    ):
 
+        if len(full_shape) != cls.tensor_mode:
+            raise ValueError(f"Expecting {cls.tensor_mode}-mode full tensor, but got {full_shape}.")
+
+        if len(core_shape) != cls.tensor_mode:
+            raise ValueError(f"Expecting {cls.tensor_mode}-mode core tensor, but got {core_shape}.")
+            
+        key, key_ = jr.split(key)
+        G = jr.gamma(key, alpha, shape=tuple(core_shape))
+        Fs = [
+            jr.gamma(key_, alpha, shape=F_shape)
+            for key_, F_shape in zip(jr.split(key_, cls.tensor_mode), zip(full_shape, core_shape))
+        ]
+
+        return G, *Fs
+                    
     @classmethod
     def random_init(cls,
                     key: PRNGKeyArray,
                     full_shape: Sequence[int],
                     core_shape: Sequence[int],
+                    alpha: float=0.1,
     ) -> "PoissonTucker":
         """Initialize a Poisson Tucker instance with random parameter values.
 
@@ -145,25 +267,12 @@ class PoissonTucker(eqx.Module):
         key: PRNGKeyArray
         full_shape: Sequence, corresponds to reconstructed tensor shape (d1, d2, d3)
         core_shape: Sequence, corresponds to core tensor shape (k1, k2, k3)
+        alpha: positive float, shape parameter of gamma distribution
         """
 
-        tensor_mode = 3
-        if len(full_shape) != tensor_mode:
-            raise ValueError(f"Expecting {tensor_mode}-mode full tensor, but got {full_shape}.")
+        factors = cls.sample_factors(key, full_shape, core_shape, alpha=alpha)
 
-        if len(core_shape) != tensor_mode:
-            raise ValueError(f"Expecting {tensor_mode}-mode core tensor, but got {core_shape}.")
-
-        key, key_ = jr.split(key)
-        G_param = jr.uniform(key, shape=tuple(core_shape), minval=-5, maxval=5)
-        F_params = [
-            jr.uniform(key_, shape=F_shape, minval=-5, maxval=5)
-            for key_, F_shape in zip(jr.split(key_, tensor_mode), zip(full_shape, core_shape))
-        ]
-
-        params = jax.tree_util.tree_map(cls._transform, (G_param, *F_params))
-        
-        return cls(*params)
+        return cls(*factors)
 
     @property
     def full_shape(self,) -> Tuple[int, int, int]:
@@ -187,23 +296,6 @@ class PoissonTucker(eqx.Module):
     @property
     def factors(self,) -> tuple:
         return jax.tree_util.tree_map(self._transform, self.params)
-    
-    def random_mask(self, key: PRNGKeyArray, frac: float=1.0) -> Bool[Array, "*batch"]:
-        """Make random boolean mask to hold-in data.
-        
-        Parameters
-        ----------
-        key: PRNGKeyArray
-        frac: Fraction of batch shape to hold-in. Default: 1.0, do not mask.
-
-        Returns
-        -------
-        mask: boolean array
-
-        """
-
-        batch_shape = self.full_shape[:self.batch_ndims]
-        return jr.bernoulli(key, frac, batch_shape)
     
     def reconstruct(self,) -> Float[Array, "*full"]:
         """Reconstruct mean rate from parameterized decomposition."""
@@ -243,7 +335,7 @@ class PoissonTucker(eqx.Module):
         """Compute full-batch Poisson log-likelihood under the current parameters."""
         
         mean_rate = self.reconstruct()
-        return poisson_log_prob(data, mean_rate)
+        return tfd.Poisson(rate=mean_rate).log_prob(data)
     
     def log_likelihood(self,
                        data: Integer[Array, "*full"],
@@ -272,7 +364,7 @@ class PoissonTucker(eqx.Module):
     
 
 class ScaledPoissonTucker(PoissonTucker):
-    """Base class for Multinomial Tucker model.
+    """Base class for scaled Poisson Tucker model.
     
     Attributes
     ----------
@@ -335,24 +427,9 @@ class ScaledPoissonTucker(PoissonTucker):
             Concentration of Dirichlet prior. Default: 0.9, sparse prior.
         """
 
-        tensor_mode = 3
-        if len(full_shape) != tensor_mode:
-            raise ValueError(f"Expecting {tensor_mode}-mode tensor shape, but got {full_shape}.")
-
-        if len(core_shape) != tensor_mode:
-            raise ValueError(f"Expecting {tensor_mode}-mode core tensor, but got {core_shape}.")
-
-        d1, d2, d3 = full_shape
-        k1, k2, k3 = core_shape
-
-        # Sample parameters from Dirichlet; initialied to be normalized correctly
-        key_0, key_1, key_2, key_3 = jr.split(key, 4)
-        G = jr.dirichlet(key_0, alpha=alpha*jnp.ones(k3), shape=(k1, k2))
-        F1 = jr.dirichlet(key_1, alpha=alpha*jnp.ones(k1), shape=(d1,))
-        F2 = jr.dirichlet(key_2, alpha=alpha*jnp.ones(k2), shape=(d2,))
-        F3 = jr.dirichlet(key_3, alpha=alpha*jnp.ones(d3), shape=(k3,)).T
+        factors = super().sample_factors(key, full_shape, core_shape, alpha=alpha)
         
-        return cls(G, F1, F2, F3, scale,)
+        return cls(*factors, scale,)
     
     def reconstruct(self,):
         tnsr = super().reconstruct()
@@ -368,19 +445,16 @@ class ScaledPoissonTucker(PoissonTucker):
     
     
 class ProjectedPoissonTucker(ScaledPoissonTucker):
-    """Scaled Poisson Tucker model with parameters normalized post-hoc."""
+    """A vanilla Poisson Tucker model with a scale parameter.
 
-    @property
-    def factors(self,) -> tuple:
-        G, F1, F2, F3 = super().factors
-        g_axis, f1_axis, f2_axis, f3_axis = self.normalized_axes
+    Scale parameter is only used in evaluating multinomial log likelihood.
+    """
 
-        projected_factors = jax.tree_util.tree_map(
-            lambda fctr, axis: fctr / fctr.sum(axis=axis, keepdims=True),
-            super().factors, self.normalized_axes
-        )
-
-        return projected_factors
+    def reconstruct(self,):
+        # Inelegant, but this returns the (unscaled) mean rate.
+        # Ideally, we would like to just directly call PoissonTucker.reconstruct()
+        tnsr = super().reconstruct()
+        return tnsr / self.scale
 
 
 class L2PenalizedPoissonTucker(ScaledPoissonTucker):
@@ -450,7 +524,24 @@ class SimplexPoissonTucker(ScaledPoissonTucker):
         Number of trials in a Multinomial distribution. Samples from the
         distribution sum to this value along the simplex-normalized axes.
     """
-    
+
+    def __init__(self,
+                 G: Float[Array, "k1 k2 k3"],
+                 F1: Float[Array, "d1 k1"],
+                 F2: Float[Array, "d2 k2"],
+                 F3: Float[Array, "d3 k3"],
+                 scale,
+    ):
+        G_param, F1_param, F2_param, F3_param \
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3), self.normalized_axes)
+        
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
+
+        self.scale = scale
+
     @classmethod
     def _transform(cls,
                    param: Float[Array, "..."],
@@ -466,10 +557,6 @@ class SimplexPoissonTucker(ScaledPoissonTucker):
                            ) -> Float[Array, "..."]:
         """Transform non-negative value to unconstrained parameter."""
         return softmax_inverse(val, axis=axis)
-
-    @classmethod
-    def params_from_vals(cls, *vals) -> tuple:
-        return jax.tree_util.tree_map(cls._inverse_transform, vals, cls.normalized_axes)
 
     @property
     def factors(self,) -> tuple:
