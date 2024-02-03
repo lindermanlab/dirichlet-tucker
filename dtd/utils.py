@@ -53,7 +53,7 @@ def softmax_inverse(
     return log_x - log_x.mean(axis=axis, keepdims=True)
 
 
-def make_data_mask(self, key: PRNGKeyArray, shape: tuple, frac: float=1.0) -> Bool[Array, "*shape"]:
+def random_mask(key: PRNGKeyArray, shape: tuple, frac: float=1.0) -> Bool[Array, "*shape"]:
     """Make random boolean mask to hold-in data.
     
     Parameters
@@ -68,7 +68,7 @@ def make_data_mask(self, key: PRNGKeyArray, shape: tuple, frac: float=1.0) -> Bo
 
     """
 
-    return jr.bernoulli(key, frac, batch_shape)
+    return jr.bernoulli(key, frac, shape)
 
 def calculate_minibatch_size(d1,d2,d3,k1,k2,k3,mem_gb,mem_frac=0.75):
     """Calculate minibatch size that maximizes available memory.

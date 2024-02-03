@@ -56,7 +56,7 @@ class DirichletTucker(BaseTucker):
     F2_param: Float[Array, "d2 k2"]
     F3_param: Float[Array, "d3 k3"]
 
-    event_ndim: int = 0
+    event_ndim: int = 1
     tensor_mode: int = 3
     normalized_axes: tuple = (2, 1, 1, 0)
     scale: int = eqx.static_field()  # Replace with `eqx.field(static=True)` for equinox version >= 0.10.5
