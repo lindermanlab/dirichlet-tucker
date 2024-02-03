@@ -11,6 +11,8 @@ from dtd.poisson_tucker_3d import (
     SimplexPoissonTucker
 )
 
+from dtd.dirichlet_tucker_3d import DirichletTucker
+
 def test_poisson_tucker(full_shape=(10,8,5),
                         core_shape=(4,3,2,)):
     
@@ -34,8 +36,9 @@ def test_poisson_tucker(full_shape=(10,8,5),
     ProjectedPoissonTucker,
     L2PenalizedPoissonTucker,
     SimplexPoissonTucker,
+    DirichletTucker
 ])
-def test_constrained_poisson_tucker(model_klass):
+def test_tucker_models_with_scale_param(model_klass):
     
     key = jr.PRNGKey(0)
     key_init, key_sample = jr.split(key)
