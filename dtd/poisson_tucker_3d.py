@@ -52,6 +52,21 @@ class BaseTucker(eqx.Module):
     event_ndim: int = 0
     tensor_mode: int = 3
 
+    def __init__(self,
+                 G: Float[Array, "k1 k2 k3"],
+                 F1: Float[Array, "d1 k1"],
+                 F2: Float[Array, "d2 k2"],
+                 F3: Float[Array, "d3 k3"],
+                 *args, **kwargs
+    ):
+        G_param, F1_param, F2_param, F3_param \
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
+        
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
+        
     @classmethod
     def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform unconstrained parameter to non-negative value."""
@@ -60,25 +75,6 @@ class BaseTucker(eqx.Module):
     @classmethod
     def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform non-negative value to unconstrained parameter."""
-        raise NotImplementedError
-
-    @classmethod
-    def sample_factors(cls,
-                       key: PRNGKeyArray,
-                       full_shape: Sequence[int],
-                       core_shape: Sequence[int],
-                       *args, **kwargs,
-    ):
-        raise NotImplementedError
-                    
-    @classmethod
-    def random_init(cls,
-                    key: PRNGKeyArray,
-                    full_shape: Sequence[int],
-                    core_shape: Sequence[int],
-                    *args, **kwargs,
-    ):
-        
         raise NotImplementedError
 
     @property
@@ -115,6 +111,29 @@ class BaseTucker(eqx.Module):
 
         return tnsr
 
+    @classmethod
+    def sample_factors(cls,
+                       key: PRNGKeyArray,
+                       full_shape: Sequence[int],
+                       core_shape: Sequence[int],
+                       *args, **kwargs,
+    ):
+        """Randomly sample factors given full and core tensor shapes."""
+        raise NotImplementedError
+                    
+    @classmethod
+    def random_init(cls,
+                    key: PRNGKeyArray,
+                    full_shape: Sequence[int],
+                    core_shape: Sequence[int],
+                    *args, **kwargs,
+    ):
+        """Instantiate class with randomly initialized factors."""
+        
+        factors = cls.sample_factors(key, full_shape, core_shape, *args, **kwargs)
+
+        return cls(*factors, *args, **kwargs)
+        
     def sample(self,
                key: PRNGKeyArray,
                sample_shape: tuple=(),
@@ -166,7 +185,7 @@ class BaseTucker(eqx.Module):
         lp += log_prior_scale * self.log_prior()
         return lp
 
-class PoissonTucker(eqx.Module):
+class PoissonTucker(BaseTucker):
     """Three-mode Poisson Tucker class.
 
     Given core tensor G and factors F1, F2, F3, the Tucker reconstruction
@@ -203,21 +222,7 @@ class PoissonTucker(eqx.Module):
 
     event_ndim: int = 0
     tensor_mode: int = 3
-
-    def __init__(self,
-                 G: Float[Array, "k1 k2 k3"],
-                 F1: Float[Array, "d1 k1"],
-                 F2: Float[Array, "d2 k2"],
-                 F3: Float[Array, "d3 k3"],
-    ):
-        G_param, F1_param, F2_param, F3_param \
-            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
-        
-        self.G_param = G_param
-        self.F1_param = F1_param
-        self.F2_param = F2_param
-        self.F3_param = F3_param
-
+    
     @classmethod
     def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform unconstrained parameter to non-negative value."""
@@ -250,63 +255,6 @@ class PoissonTucker(eqx.Module):
         ]
 
         return G, *Fs
-                    
-    @classmethod
-    def random_init(cls,
-                    key: PRNGKeyArray,
-                    full_shape: Sequence[int],
-                    core_shape: Sequence[int],
-                    alpha: float=0.1,
-    ) -> "PoissonTucker":
-        """Initialize a Poisson Tucker instance with random parameter values.
-
-        (Unconstrained) parameters are sampled from Uniform(-5, 5).
-        
-        Parameters
-        ----------
-        key: PRNGKeyArray
-        full_shape: Sequence, corresponds to reconstructed tensor shape (d1, d2, d3)
-        core_shape: Sequence, corresponds to core tensor shape (k1, k2, k3)
-        alpha: positive float, shape parameter of gamma distribution
-        """
-
-        factors = cls.sample_factors(key, full_shape, core_shape, alpha=alpha)
-
-        return cls(*factors)
-
-    @property
-    def full_shape(self,) -> Tuple[int, int, int]:
-        """Shape of reconstructed tensor."""
-        return tuple([len(f) for f in [self.F1_param, self.F2_param, self.F3_param]])
-    
-    @property
-    def core_shape(self,) -> Tuple[int, int, int]:
-        """Shape of core tensor."""
-        return self.G_param.shape
-
-    @property
-    def batch_ndims(self,) -> int:
-        """Number of batch (independent) dimensions in reconstructed tensor."""
-        return len(self.full_shape) - self.event_ndim
-    
-    @property
-    def params(self,) -> tuple:
-        return self.G_param, self.F1_param, self.F2_param, self.F3_param
-
-    @property
-    def factors(self,) -> tuple:
-        return jax.tree_util.tree_map(self._transform, self.params)
-    
-    def reconstruct(self,) -> Float[Array, "*full"]:
-        """Reconstruct mean rate from parameterized decomposition."""
-
-        G, F1, F2, F3 = self.factors
-        
-        tnsr = jnp.einsum('zc, abc-> abz', F3, G)
-        tnsr = jnp.einsum('yb, abz-> ayz', F2, tnsr)
-        tnsr = jnp.einsum('xa, ayz-> xyz', F1, tnsr)
-
-        return tnsr
 
     def sample(self,
                key: PRNGKeyArray,
@@ -327,6 +275,11 @@ class PoissonTucker(eqx.Module):
         
         mean_rate = self.reconstruct()
 
+        # using tfd.Poisson raises
+        #   UserWarning: Explicitly requested dtype <class 'jax.numpy.float64'>
+        #   requested in ones is not available, and will be truncated to dtype float32.
+        # return tfd.Poisson(rate=mean_rate).sample(sample_shape, key)
+        
         return jr.poisson(key, mean_rate, shape=(*sample_shape, *self.full_shape))
     
     def _fullbatch_log_likelihood(self,
@@ -336,31 +289,11 @@ class PoissonTucker(eqx.Module):
         
         mean_rate = self.reconstruct()
         return tfd.Poisson(rate=mean_rate).log_prob(data)
-    
-    def log_likelihood(self,
-                       data: Integer[Array, "*full"],
-                       minibatch_size: int=0,
-    ) -> Float[Array, "*batch"]:
-        """Compute log likelihood of data under the model."""
-        
-        if minibatch_size > 0:
-            raise NotImplementedError
-        else:
-            return self._fullbatch_log_likelihood(data)
         
     def log_prior(self,) -> Float[Array, "#batch"]:
         """Compute log prior of parameter values."""
 
         return jnp.array(0)
-    
-    def log_prob(self,
-                data: Integer[Array, "*full"],
-                minibatch_size: int=0,
-                log_prior_scale: float=1.) -> Float[Array, "*batch"]:
-        
-        lp = self.log_likelihood(data, minibatch_size)
-        lp += log_prior_scale * self.log_prior()
-        return lp
     
 
 class ScaledPoissonTucker(PoissonTucker):
