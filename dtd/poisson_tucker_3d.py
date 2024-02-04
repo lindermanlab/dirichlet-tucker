@@ -208,7 +208,9 @@ class ScaledPoissonTucker(PoissonTucker):
                                  ) -> Float[Array, "*batch"]:
         """Compute full-batch Poisson log-likelihood under the current parameters."""
         
-        ll = super()._fullbatch_log_likelihood(data)
+        # ll = super()._fullbatch_log_likelihood(data)
+        mean_rate = self.reconstruct()
+        ll = tfd.Poisson(rate=mean_rate).log_prob(data)
         return ll.sum(axis=-1)
     
     

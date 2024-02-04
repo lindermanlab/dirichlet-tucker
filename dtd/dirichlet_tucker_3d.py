@@ -21,7 +21,7 @@ import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 
 from dtd.poisson_tucker_3d import BaseTucker
-from dtd.utils import softplus_forward, softplus_inverse
+from dtd.utils import softplus_forward, softplus_inverse, softmax_forward, softmax_inverse
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
@@ -79,12 +79,12 @@ class DirichletTucker(BaseTucker):
     @classmethod
     def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform unconstrained parameter to non-negative value."""
-        return softplus_forward(param)
+        return softmax_forward(param)
 
     @classmethod
     def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
         """Transform non-negative value to unconstrained parameter."""
-        return softplus_inverse(val)
+        return softmax_inverse(val)
 
     @classmethod
     def sample_factors(cls,
