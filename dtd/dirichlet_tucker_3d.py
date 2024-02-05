@@ -164,3 +164,31 @@ class DirichletTucker(SoftmaxTucker):
         lp += tfd.Dirichlet(self.alpha * jnp.ones(d3)).log_prob(F3.T).sum() # (k3,)
                 
         return lp
+
+    # =========================================================================
+    
+    def e_step(self, X) -> tuple:
+        """E-step of EM algorithm.
+        
+        Compute posterior expected sufficient statistics of parameters.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def m_step(cls,
+               ss_0: Float[Array, "..."],
+               ss_1: Float[Array, "..."],
+               ss_2: Float[Array, "..."],
+               ss_3: Float[Array, "..."],) -> "DirichletTucker":
+        """M-step of EM algorithm.
+
+        Parameters
+        ----------
+        ss_0, ss_1, ss_2, ss_3:
+            Posterior sufficient statistics for core tensor and factors.
+
+        Returns
+        -------
+        New class with parameters that maximize the posterior conditional distribution.
+        """
+        raise NotImplementedError
