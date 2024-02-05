@@ -20,14 +20,13 @@ import jax.numpy as jnp
 import jax.random as jr
 from tensorflow_probability.substrates import jax as tfp
 
-from dtd.poisson_tucker_3d import BaseTucker
-from dtd.utils import softplus_forward, softplus_inverse, softmax_forward, softmax_inverse
+from dtd.base_tucker_3d import SoftmaxTucker
 
 tfd = tfp.distributions
 warnings.filterwarnings("ignore")
 
 
-class DirichletTucker(BaseTucker):
+class DirichletTucker(SoftmaxTucker):
     """Three-mode Dirichlet Tucker decomposition class.
 
     All shape annotations assume `batch_dims=(d1, d2)`, `event_dims=(d3,)`.
@@ -71,21 +70,18 @@ class DirichletTucker(BaseTucker):
                  alpha: float = 1.1,
                  *args, **kwargs
     ):
-        super().__init__(G, F1, F2, F3)
+        G_param, F1_param, F2_param, F3_param \
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3), self.normalized_axes)
+        
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
         
         self.scale = scale
         self.alpha = alpha
         
-    @classmethod
-    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform unconstrained parameter to non-negative value."""
-        return softmax_forward(param)
-
-    @classmethod
-    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform non-negative value to unconstrained parameter."""
-        return softmax_inverse(val)
-
+    
     @classmethod
     def sample_factors(cls,
                        key: PRNGKeyArray,
@@ -140,7 +136,6 @@ class DirichletTucker(BaseTucker):
         Returns
         -------
         samples: shape (*sample_shape, *full)
-
         """
 
         event_probs = self.reconstruct()

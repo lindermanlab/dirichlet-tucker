@@ -1,8 +1,12 @@
-"""Three-mode Tucker decomposition base class."""
+"""Three-mode Tucker decomposition base class.
+
+Subclasses should inherit from either SoftplusTucker
+or SoftmaxTucker, depending on the tight of transform constraint.
+"""
 
 from typing import Optional, Sequence, Tuple, Union
 from jax._src.prng import PRNGKeyArray
-from jaxtyping import Array, Bool, Float, Integer
+from jaxtyping import Array, ArrayLike, Bool, Float, Integer
 
 import warnings
 import itertools
@@ -11,7 +15,17 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from dtd.utils import softplus_forward, softplus_inverse, softmax_forward, softmax_inverse
+
 warnings.filterwarnings("ignore")
+
+TuckerFactors = Tuple[
+    Float[Array, "k1 k2 k3"],
+    Float[Array, "d1 k1"],
+    Float[Array, "d2 k2"],
+    Float[Array, "d3 k3"],
+]
+
 
 class BaseTucker(eqx.Module):
     """Three-mode Tucker decomposition base class.
@@ -45,31 +59,6 @@ class BaseTucker(eqx.Module):
     event_ndim: int = 0
     tensor_mode: int = 3
 
-    def __init__(self,
-                 G: Float[Array, "k1 k2 k3"],
-                 F1: Float[Array, "d1 k1"],
-                 F2: Float[Array, "d2 k2"],
-                 F3: Float[Array, "d3 k3"],
-                 *args, **kwargs
-    ):
-        G_param, F1_param, F2_param, F3_param \
-            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
-        
-        self.G_param = G_param
-        self.F1_param = F1_param
-        self.F2_param = F2_param
-        self.F3_param = F3_param
-        
-    @classmethod
-    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform unconstrained parameter to non-negative value."""
-        raise NotImplementedError
-
-    @classmethod
-    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
-        """Transform non-negative value to unconstrained parameter."""
-        raise NotImplementedError
-
     @property
     def full_shape(self,) -> Tuple[int, int, int]:
         """Shape of reconstructed tensor."""
@@ -86,21 +75,32 @@ class BaseTucker(eqx.Module):
         return len(self.full_shape) - self.event_ndim
     
     @property
-    def params(self,) -> tuple:
+    def params(self,) -> TuckerFactors:
         return self.G_param, self.F1_param, self.F2_param, self.F3_param
 
+    @classmethod
+    def _transform(cls, param: Float[Array, "..."], *args, **kwargs) -> Float[Array, "..."]:
+        """Transform unconstrained parameter to non-negative value."""
+        raise NotImplementedError
+
+    @classmethod
+    def _inverse_transform(cls, val: Float[Array, "..."], *args, **kwargs) -> Float[Array, "..."]:
+        """Transform non-negative value to unconstrained parameter."""
+        raise NotImplementedError
+
     @property
-    def factors(self,) -> tuple:
-        return jax.tree_util.tree_map(self._transform, self.params)
+    def factors(self,) -> TuckerFactors:
+        """Return factors in constrained value space."""
+        raise NotImplementedError
     
     def reconstruct(self,) -> Float[Array, "*full"]:
         """Reconstruct mean rate from parameterized decomposition."""
 
         G, F1, F2, F3 = self.factors
-        
-        tnsr = jnp.einsum('zc, abc-> abz', F3, G)
-        tnsr = jnp.einsum('yb, abz-> ayz', F2, tnsr)
-        tnsr = jnp.einsum('xa, ayz-> xyz', F1, tnsr)
+
+        tnsr = jnp.einsum('pk, ijk -> ijp', F3, G)
+        tnsr = jnp.einsum('nj, ijp -> inp', F2, tnsr)
+        tnsr = jnp.einsum('mi, inp -> mnp', F1, tnsr)
 
         return tnsr
 
@@ -110,7 +110,7 @@ class BaseTucker(eqx.Module):
                        full_shape: Sequence[int],
                        core_shape: Sequence[int],
                        *args, **kwargs,
-    ):
+    ) -> TuckerFactors:
         """Randomly sample factors given full and core tensor shapes."""
         raise NotImplementedError
                     
@@ -167,7 +167,7 @@ class BaseTucker(eqx.Module):
     def log_prior(self,) -> float:
         """Compute log prior of parameter values."""
 
-        raise NotImplementedError
+        return jnp.array(0)
     
     def log_prob(self,
                 data: Integer[Array, "*full"],
@@ -177,3 +177,107 @@ class BaseTucker(eqx.Module):
         lp = self.log_likelihood(data, minibatch_size).sum()
         lp += log_prior_scale * self.log_prior()
         return lp
+
+    def e_step(self, X) -> tuple:
+        """E-step of EM algorithm.
+        
+        Compute posterior expected sufficient statistics of parameters.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def m_step(cls,
+               ss_0: Float[ArrayLike, "..."],
+               ss_1: Float[ArrayLike, "..."],
+               ss_2: Float[ArrayLike, "..."],
+               ss_3: Float[ArrayLike, "..."],) -> "BaseTucker":
+        """M-step of EM algorithm.
+
+        Parameters
+        ----------
+        ss_0, ss_1, ss_2, ss_3:
+            Posterior sufficient statistics for core tensor and factors.
+
+        Returns
+        -------
+        New class with parameters that maximize the posterior conditional distribution.
+        """
+        raise NotImplementedError
+
+
+class SoftplusTucker(BaseTucker):
+
+    def __init__(self,
+                 G: Float[Array, "k1 k2 k3"],
+                 F1: Float[Array, "d1 k1"],
+                 F2: Float[Array, "d2 k2"],
+                 F3: Float[Array, "d3 k3"],
+                 *args, **kwargs
+    ):
+        
+        G_param, F1_param, F2_param, F3_param \
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3))
+        
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
+
+    
+    @classmethod
+    def _transform(cls, param: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform unconstrained parameter to non-negative value."""
+        return softplus_forward(param)
+
+    @classmethod
+    def _inverse_transform(cls, val: Float[Array, "..."]) -> Float[Array, "..."]:
+        """Transform non-negative value to unconstrained parameter."""
+        return softplus_inverse(val)
+
+    @property
+    def factors(self,) -> TuckerFactors:
+        """Return factors in constrained value space."""
+        return jax.tree_util.tree_map(self._transform, self.params)
+
+
+class SoftmaxTucker(BaseTucker):
+
+    # Define axes over which to take softmax over
+    normalized_axes: tuple
+    
+    def __init__(self,
+                 G: Float[Array, "k1 k2 k3"],
+                 F1: Float[Array, "d1 k1"],
+                 F2: Float[Array, "d2 k2"],
+                 F3: Float[Array, "d3 k3"],
+                 *args, **kwargs
+    ):
+        
+        G_param, F1_param, F2_param, F3_param \
+            = jax.tree_util.tree_map(self._inverse_transform, (G, F1, F2, F3), self.normalized_axes)
+        
+        self.G_param = G_param
+        self.F1_param = F1_param
+        self.F2_param = F2_param
+        self.F3_param = F3_param
+
+    @classmethod
+    def _transform(cls,
+                   param: Float[Array, "..."],
+                   axis: Optional[int]=-1,
+    ) -> Float[Array, "..."]:
+        """Transform unconstrained parameter to non-negative value."""
+        return softmax_forward(param, axis=axis)
+
+    @classmethod
+    def _inverse_transform(cls,
+                           val: Float[Array, "..."],
+                           axis: Optional[int]=-1,
+    ) -> Float[Array, "..."]:
+        """Transform non-negative value to unconstrained parameter."""
+        return softmax_inverse(val, axis=axis)
+
+    
+    @property
+    def factors(self,) -> TuckerFactors:
+        return jax.tree_util.tree_map(self._transform, self.params, self.normalized_axes)
