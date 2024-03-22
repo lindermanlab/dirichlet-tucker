@@ -156,15 +156,15 @@ def evaluate_prediction(Psi, y):
 
     return acc, confusion_mat
 
-def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
+def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters, train_frac=0.8, tol=1e-4):
     key = jr.PRNGKey(seed)
 
     # Split the data deterministically
     X, y = load_data(data_dir)
-    mask = make_mask(X, key=0)
+    mask = make_mask(X, key=0, train_frac=train_frac)
 
     # Fit the model using the random seed provided
-    model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha, num_iters)
+    model, params, lps, pct_dev = fit_model(key, X, mask, km, kn, kp, ks, alpha, num_iters, tol)
     
     G, Psi, Phi, Theta, Lambda = params
     acc, confusion_matrix = evaluate_prediction(Psi, y)
@@ -175,6 +175,8 @@ def run_one(data_dir, seed, km, kn, kp, ks, alpha, num_iters):
     # Finish the session
     print("pct_dev:", pct_dev)
     print("acc:", acc)
+
+    return model, params, lps, acc, confusion_matrix
 
 
 @click.command()
