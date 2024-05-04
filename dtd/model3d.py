@@ -421,7 +421,7 @@ class DirichletTuckerDecomp:
         """
 
         # Instantiate an iterator that produces minibatches of indices into the data
-        batch_shape = X.shape[0]
+        batch_shape = X.shape[:1]
         indices_iterator = ShuffleIndicesIterator(key, batch_shape, minibatch_size)
         print(f'Running {indices_iterator.n_complete} minibatches of size {indices_iterator.minibatch_size}.')
         print(f"Incomplete minibatch size of {indices_iterator.incomplete_size}. drop_last={drop_last},")
@@ -437,10 +437,10 @@ class DirichletTuckerDecomp:
         learning_rates = learning_rates.reshape(n_epochs, n_minibatches_per_epoch)
 
         # Minibatch scaling factor, for each sufficient statistic. See math notes.
-        scaling_factor = (batch_shape / minibatch_size,  # global G (K1, K2, K3)
-                          1.0,                           # local Psi (B, K1)
-                          batch_shape / minibatch_size,  # global Phi (N, K2)
-                          batch_shape / minibatch_size,) # global Theta (K3, P)
+        scaling_factor = (batch_shape[0] / minibatch_size,  # global G (K1, K2, K3)
+                          1.0,                              # local Psi (B, K1)
+                          batch_shape[0] / minibatch_size,  # global Phi (N, K2)
+                          batch_shape[0] / minibatch_size,) # global Theta (K3, P)
 
         # Define EM step
         def em_step(carry, these_inputs):
