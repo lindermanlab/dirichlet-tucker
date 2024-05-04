@@ -298,10 +298,10 @@ class DirichletTuckerDecomp:
         return params, jnp.stack(lps)
 
     def _zero_rolling_stats(self, X, minibatch_size):
-        M, N, P = X.shape
+        _, N, P = X.shape
         return (jnp.zeros((self.K_M, self.K_N, self.K_P)),
                 jnp.zeros((minibatch_size, self.K_M)),
-                jnp.zeros((minibatch_size, self.K_N)),
+                jnp.zeros((N, self.K_N)),
                 jnp.zeros((self.K_P, P)),
         )
     
@@ -309,54 +309,50 @@ class DirichletTuckerDecomp:
         """Fancy-index the samples associated with `these_idxs` from each input
 
         Parameters
-            these_idxs: shape (m, batch_ndims)
-            X: data tensor, shape (b1, b2, e1)
-            mask: data mask, shape (b1, b2)
+            these_idxs: shape (M,)
+            X: data tensor, shape (M, N, P)
+            mask: data mask, shape (M, N)
             params: tuple of model parameters
-                G: shape (k1, k2, k3)
-                Psi: shape (b1, k1)
-                Phi: shape (b2, k2)
-                Theta: shape (e1, k3)
+                G: shape (K1, K2, K3)
+                Psi: shape (M, K1)
+                Phi: shape (N, K2)
+                Theta: shape (P, K3)
             stats: tuple of expected sufficient statistics
-                alpha_G: shape (k1, k2, k3)
-                alpha_Psi: shape (b1, k1)
-                alpha_Phi: shape (b2, k2)
-                alpha_Theta: shape (k3, e1)
+                alpha_G: shape (K1, K2, K3)
+                alpha_Psi: shape (B, K1)
+                alpha_Phi: shape (N, K2)
+                alpha_Theta: shape (K3, P)
         
         Returns
-            this_X: data tensor, shape (m, e1)
-            this_mask: data mask, shape (m)
+            this_X: data tensor, shape (B, N, P)
+            this_mask: data mask, shape (B, N)
             these_params: tuple of model parameters
-                G: shape (k1, k2, k3), unchanged
-                Psi: shape (m, k1)
-                Phi: shape (m, k2)
-                Theta: shape (e1, k3), unchanged
+                G: shape (K1, K2, K3), unchanged
+                Psi: shape (B, K1)
+                Phi: shape (N, K2), unchanged
+                Theta: shape (K3, P), unchanged
             these_stats: tuple of expected sufficient statistics
-                alpha_G: shape (k1, k2, k3), unchanged
-                alpha_Psi: shape (m, k1)
-                alpha_Phi: shape (m, k2)
-                alpha_Theta: shape (k3, e1), unchanged
+                alpha_G: shape (K1, K2, K3), unchanged
+                alpha_Psi: shape (B, K1)
+                alpha_Phi: shape (N, K2) unchanged
+                alpha_Theta: shape (K3, P), unchanged
         """
         
-        this_X = X[these_idxs[:,0], these_idxs[:,1]]
-        this_mask = mask[these_idxs[:,0], these_idxs[:,1]]
+        this_X = X[these_idxs]
+        this_mask = mask[these_idxs]
 
         # Index into parameters and statistics
         G, Psi, Phi, Theta = params
         alpha_G, alpha_Psi, alpha_Phi, alpha_Theta = stats
 
         # Returns: (minibatch_size, K_M)
-        this_Psi = Psi[these_idxs[:,0], :]
-        this_alpha_Psi = alpha_Psi[these_idxs[:,0], :]
-        
-        # Returns: (minibatch_size, K_N)
-        this_Phi = Phi[these_idxs[:,1], :]
-        this_alpha_Phi = alpha_Phi[these_idxs[:,1], :]
-        
+        this_Psi = Psi[these_idxs, :]
+        this_alpha_Psi = alpha_Psi[these_idxs, :]
+                
         return (this_X,
                 this_mask,
-                (G, this_Psi, this_Phi, Theta),
-                (alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta))
+                (G, this_Psi, Phi, Theta),
+                (alpha_G, this_alpha_Psi, alpha_Phi, alpha_Theta))
     
     def minibatched_e_step(self, X, mask, params):
         """Compute posterior expected sufficient statistics of parameters from a minibatch of data.
@@ -366,36 +362,31 @@ class DirichletTuckerDecomp:
         Additionally, only the parameters relevant to the minibatch are provided.
 
         Parameters
-            X: (B, P) count tensor
-            mask: (B,) binary matrix specifying held-out samples.
+            X: (B, N, P) count tensor
+            mask: (B, N) binary matrix specifying held-out samples.
             params: tuple of arrays
                 G: shape (K_M, K_N, K_P)
                 Psi: shape (B, K_M)
-                Phi: shape (B, K_N)
+                Phi: shape (N, K_N)
                 Theta: shape (K_P, P)
         
         Returns
             alpha_G: shape (K_M, K_N, K_P)
             alpha_Psi: shape (B, K_M)
-            alpha_Phi: shape (B, K_N)
+            alpha_Phi: shape (N, K_N)
             alpha_Theta: shape (K_P, P)
         """
+        # Compute probabilities for this minibatch of data
+        probs = jnp.einsum('ijk,bi,nj,kp->bnp', *params)
+        masked_X = X * mask[..., None]
 
-        # Note the different einsum notation when working with minibatched data.
-        # This is equivalent to calculating the full tensor associated with these
-        # parameters, then taking the principle diagonal along the batch dims.
-        probs = jnp.einsum('ijk,bi,bj,kp->bp', *params)
-        relative_probs = jnp.einsum('ijk,bi,bj,kp->ijkbp', *params)
-        relative_probs /= probs
-        E_Z = X * mask[..., None] * relative_probs
-
-        # Note how E_z has collapsed the batch dimensions into a single axis.
-        # This changes the indexing and which axes are being summed over.
-        alpha_G = jnp.sum(E_Z, axis=(3,4))
-        alpha_Psi = jnp.sum(E_Z, axis=(1,2,4)).T
-        alpha_Phi = jnp.sum(E_Z, axis=(0,2,4)).T
-        alpha_Theta = jnp.sum(E_Z, axis=(0,1,3))
-
+        alpha_G = params[0] * jnp.einsum('bnp,bi,nj,kp->ijk', masked_X/probs, *params[1:])        
+        r_psi = jnp.einsum('ijk,bi,nj,kp->ibnp', *params)
+        alpha_Psi = (masked_X * (r_psi / probs)).sum(axis=(2,3)).T
+        r_phi = jnp.einsum('ijk,bi,nj,kp->jbnp', *params)
+        alpha_Phi = (masked_X * (r_phi / probs)).sum(axis=(1,3)).T
+        r_theta = jnp.einsum('ijk,bi,nj,kp->kbnp', *params)
+        alpha_Theta = (masked_X * (r_theta / probs)).sum(axis=(1,2))
         return alpha_G, alpha_Psi, alpha_Phi, alpha_Theta
     
     def stochastic_fit(self, X, mask, init_params, n_epochs,
@@ -430,7 +421,7 @@ class DirichletTuckerDecomp:
         """
 
         # Instantiate an iterator that produces minibatches of indices into the data
-        batch_shape = X.shape[:self.batch_ndims]
+        batch_shape = X.shape[0]
         indices_iterator = ShuffleIndicesIterator(key, batch_shape, minibatch_size)
         print(f'Running {indices_iterator.n_complete} minibatches of size {indices_iterator.minibatch_size}.')
         print(f"Incomplete minibatch size of {indices_iterator.incomplete_size}. drop_last={drop_last},")
@@ -446,10 +437,10 @@ class DirichletTuckerDecomp:
         learning_rates = learning_rates.reshape(n_epochs, n_minibatches_per_epoch)
 
         # Minibatch scaling factor, for each sufficient statistic. See math notes.
-        scaling_factor = (batch_shape[0] * batch_shape[1] / minibatch_size**2,  # M / B_M * N / B_N
-                          batch_shape[1] / minibatch_size,                      # N / B_N
-                          batch_shape[0] / minibatch_size,                      # M / B_M
-                          batch_shape[0] * batch_shape[1] / minibatch_size**2,) # M / B_M * N / B_N
+        scaling_factor = (batch_shape / minibatch_size,  # global G (K1, K2, K3)
+                          1.0,                           # local Psi (B, K1)
+                          batch_shape / minibatch_size,  # global Phi (N, K2)
+                          batch_shape / minibatch_size,) # global Theta (K3, P)
 
         # Define EM step
         def em_step(carry, these_inputs):
@@ -472,19 +463,20 @@ class DirichletTuckerDecomp:
                 _update_fn, these_prev_rolling_stats, these_stats, scaling_factor
             )
 
-            # Maximize the posterior
-            G, this_Psi, this_Phi, Theta = self.m_step(*these_rolling_stats)
+            # Maximize the posterior (use these stats for Psi since it's not rolling)
+            _, this_Psi, _, _ = self.m_step(*these_stats)
+            G, _, Phi, Theta = self.m_step(*these_rolling_stats)
 
-            # Update the Psi and Phi of params and rolling stats at specified indices
-            Psi, Phi = prev_params[1], prev_params[2]
-            Psi = Psi.at[these_idxs[:,0],:].set(this_Psi)
-            Phi = Phi.at[these_idxs[:,1],:].set(this_Phi)
+            # Update the Psi of params and rolling stats at specified indices
+            Psi = prev_params[1]
+            Psi = Psi.at[these_idxs,:].set(this_Psi)
             params = (G, Psi, Phi, Theta)
 
-            alpha_Psi, alpha_Phi = prev_rolling_stats[1], prev_rolling_stats[2]
-            alpha_G, this_alpha_Psi, this_alpha_Phi, alpha_Theta = these_rolling_stats
-            alpha_Psi = alpha_Psi.at[these_idxs[:,0],:].set(this_alpha_Psi)
-            alpha_Phi = alpha_Phi.at[these_idxs[:,1],:].set(this_alpha_Phi)
+            alpha_Psi = prev_rolling_stats[1]
+            _, this_alpha_Psi, _, _ = these_rolling_stats
+            alpha_Psi = alpha_Psi.at[these_idxs,:].set(this_alpha_Psi)
+
+            alpha_G, _, alpha_Phi, alpha_Theta = these_rolling_stats
             rolling_stats = (alpha_G, alpha_Psi, alpha_Phi, alpha_Theta)
 
             # Calculate log-likelihood on full data
