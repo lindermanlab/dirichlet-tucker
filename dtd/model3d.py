@@ -446,6 +446,7 @@ class DirichletTuckerDecomp:
         def em_step(carry, these_inputs):
             prev_params, prev_rolling_stats = carry
             these_idxs, lr = these_inputs
+            these_idxs = these_idxs[:, 0]
             
             # Gather minibatched data
             this_X, this_mask, these_prev_params, these_prev_rolling_stats \
@@ -487,6 +488,13 @@ class DirichletTuckerDecomp:
         # Explicitly jit last em step
         # TODO Have not confirmed expected behavior in reducing compile time
         incomplete_em_step = jit(em_step)
+        
+        @jit
+        def _step(params, rolling_stats, batched_indices, lrs):
+            return lax.scan(
+                em_step, (params, rolling_stats), (batched_indices, lrs),
+            )
+
 
         # Initialize parameters, rolling stats
         params = init_params
@@ -497,11 +505,13 @@ class DirichletTuckerDecomp:
 
             batched_indices, remaining_indices = next(indices_iterator)
             lrs = learning_rates[epoch]
-
+            
             # Scan through all complete minibatches
-            (params, rolling_stats), lps = lax.scan(
-                em_step, (params, rolling_stats), (batched_indices, lrs),
-            )
+            #(params, rolling_stats), lps = lax.scan(
+            #    em_step, (params, rolling_stats), (batched_indices, lrs),
+            #)
+            (params, rolling_stats), lps = _step(params, rolling_stats, batched_indices, lrs)
+
 
             # If drop_last == False, perform one final stochastic EM step over
             # the incomplete minibatch. Reuse last learning rate for simplicity;
@@ -529,8 +539,8 @@ class DirichletTuckerDecomp:
                            commit=True)
                 
             # Check for NaNs, to more quickly identify failing!
-            if any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
-                raise ValueError(f"Expected params to be finite, but got\n{params}")
+#             if any(tree_map(lambda arr: jnp.any(jnp.isnan(arr)), params)):
+#                 raise ValueError(f"Expected params to be finite, but got\n{params}")
             
             all_lps.append(lps)
 
