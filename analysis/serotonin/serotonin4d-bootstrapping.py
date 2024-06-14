@@ -1,9 +1,10 @@
-
 import bson
-import os
+import click
 import numpy as np
+import os
 import pickle
 import wandb
+
 import jax.numpy as jnp
 import jax.random as jr
 
@@ -11,24 +12,6 @@ from tensorflow_probability.substrates import jax as tfp
 from fastprogress import progress_bar
 from dtd.model4d import DirichletTuckerDecomp
 tfd = tfp.distributions
-
-# Setup logging and outputs
-WANDB_PROJECT = "serotonin-behavior-bootstrap"
-DATA_DIR = "/home/groups/swl1/swl1"
-RESULTS_DIR = r"/home/groups/swl1/swl1/dirichlet-tucker/analysis/serotonin/results/2024_06_14-11_15-bootstrap"
-if not os.path.exists(RESULTS_DIR):
-    os.mkdir(RESULTS_DIR)
-
-
-# Set hyperparameters
-KM = 22
-KN = 4 
-KP = 4 
-KS = 22 
-ALPHA = 1.1
-NUM_ITERS = 2000
-TOL = 1e-4
-NUM_BOOTSTRAP = 2
 
 
 def load_data(data_dir):
@@ -68,66 +51,102 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters, tol):
     return model, params, lps
 
 
-# Load the data
-X, _ = load_data(DATA_DIR)
-NUM_MICE, NUM_EPOCHS, NUM_POS, NUM_SYLLABLES = X.shape
-mask = jnp.ones((NUM_MICE, NUM_EPOCHS), dtype=bool)
+@click.command()
+@click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')
+@click.option('--results_dir', default="/home/groups/swl1/swl1/dirichlet-tucker/analysis/serotonin/results/2024_06_14-11_15-bootstrap", help='path to folder where results are stored.')
+@click.option('--km', default=22, help='number of mouse factors.')
+@click.option('--kn', default=4, help='number of epoch factors.')
+@click.option('--kp', default=4, help='number of position factors.')
+@click.option('--ks', default=22, help='number of syllable factors.')
+@click.option('--alpha', default=1.1, help='concentration of Dirichlet prior.')
+@click.option('--num_iters', default=2000, help='max number of iterations of EM')
+@click.option('--tol', default=1e-4, help='tolerance for EM convergence')
+@click.option('--num_bootstrap', default=1000, help='number of bootstrap iterations')
+@click.option('--wandb_project', default="serotonin-behavior-bootstrap", help='wandb project name')
+def run_sweep(data_dir, 
+              results_dir, 
+              km, 
+              kn, 
+              kp, 
+              ks, 
+              alpha, 
+              num_iters, 
+              tol, 
+              num_bootstrap,
+              wandb_project):
+    # Load the data
+    X, _ = load_data(data_dir)
+    num_mice, num_epochs, _, _ = X.shape
+    mask = jnp.ones((num_mice, num_epochs), dtype=bool)
 
-for i in progress_bar(range(NUM_BOOTSTRAP)):
-    print(f"bootstrap sample {i}")
-    result_file = os.path.join(RESULTS_DIR, f"params_{i:04d}.pkl")
-    if os.path.exists(result_file):
-        continue
-        
-    # Create a bootstrapped dataset
-    key = jr.PRNGKey(i)
-    bootstrap_inds = jr.choice(key, NUM_MICE, shape=(NUM_MICE,), replace=True)
-    bootstrap_X = X[bootstrap_inds]
-    
-    # Initialize wandb run
-    run = wandb.init(
-        project=WANDB_PROJECT,
-        job_type="train",
-        config=dict(
-            bootstrap_iter=i,
-            bootstrap_inds=bootstrap_inds,
-            km=KM,
-            kn=KN,
-            kp=KP,
-            ks=KS,
-            alpha=ALPHA,
-            tol=TOL,
-            max_num_iters=NUM_ITERS,
-            data_dir=DATA_DIR,
+    for i in progress_bar(range(num_bootstrap)):
+        print(f"bootstrap sample {i}")
+        result_file = os.path.join(results_dir, f"params_{i:04d}.pkl")
+        if os.path.exists(result_file):
+            continue
             
+        # Create a bootstrapped dataset
+        key = jr.PRNGKey(i)
+        bootstrap_inds = jr.choice(key, num_mice, shape=(num_mice,), replace=True)
+        bootstrap_X = X[bootstrap_inds]
+        
+        # Initialize wandb run
+        run = wandb.init(
+            project=wandb_project,
+            job_type="train",
+            config=dict(
+                bootstrap_iter=i,
+                bootstrap_inds=bootstrap_inds,
+                km=km,
+                kn=kn,
+                kp=kp,
+                ks=ks,
+                alpha=alpha,
+                tol=tol,
+                max_num_iters=num_iters,
+                data_dir=data_dir,
+                results_dir=results_dir,
+                )
             )
-        )
-    
-    key, init_key = jr.split(key, 2)
-    
-    # Fit the model using the random seed provided
-    model, params, lps = fit_model(init_key, X, mask, KM, KN, KP, KS, ALPHA, NUM_ITERS, TOL)
+        
+        key, init_key = jr.split(key, 2)
+        
+        # Fit the model using the random seed provided
+        model, params, lps = fit_model(init_key, 
+                                       bootstrap_X, 
+                                       mask, 
+                                       km, 
+                                       kn, 
+                                       kp, 
+                                       ks, 
+                                       alpha, 
+                                       num_iters, 
+                                       tol)
 
-    # Save and log the results
-    wandb.run.summary["final_lp"] = lps[-1]
-    print("saving results")
-    with open(result_file, 'wb') as f:
-        pickle.dump(dict(bootstrap_inds=bootstrap_inds,
-                         core_tensor=params[0],
-                         loadings=params[1],
-                         epoch_factors=params[2],
-                         position_factors=params[3],
-                         syllable_factors=params[4],
-                        ), 
-                    f)
+        # Save and log the results
+        wandb.run.summary["final_lp"] = lps[-1]
+        print("saving results")
+        with open(result_file, 'wb') as f:
+            pickle.dump(dict(bootstrap_inds=bootstrap_inds,
+                            core_tensor=params[0],
+                            loadings=params[1],
+                            epoch_factors=params[2],
+                            position_factors=params[3],
+                            syllable_factors=params[4],
+                            ), 
+                        f)
 
-    artifact = wandb.Artifact(name="params_pkl", type="model")
-    artifact.add_file(local_path=result_file)
-    run.log_artifact(artifact)
+        artifact = wandb.Artifact(name="params_pkl", type="model")
+        artifact.add_file(local_path=result_file)
+        run.log_artifact(artifact)
 
-    # Log results to wandb
-    wandb.finish()
+        # Log results to wandb
+        wandb.finish()
+        
+        del model
+        del params
+        del lps
     
-    del model
-    del params
-    del lps
+
+if __name__ == '__main__':
+    run_sweep()
