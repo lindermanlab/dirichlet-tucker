@@ -50,6 +50,19 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters, tol):
 
     return model, params, lps
 
+def bootstrap(key, groups):
+    """Generate a bootstrap sample of the indices, preserving the group sizes.
+    """
+    group_ids = jnp.unique(groups)
+    keys = jr.split(key, len(group_ids))
+
+    indices = []
+    for group_id, k in zip(group_ids, keys):
+        mouse_ids = jnp.where(groups == group_id)[0]
+        indices.append(jr.choice(k, mouse_ids, shape=(len(mouse_ids),), replace=True))
+
+    return jnp.concatenate(indices)
+    
 
 @click.command()
 @click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')
@@ -75,7 +88,7 @@ def run_sweep(data_dir,
               num_bootstrap,
               wandb_project):
     # Load the data
-    X, _ = load_data(data_dir)
+    X, drugs = load_data(data_dir)
     num_mice, num_epochs, _, _ = X.shape
     mask = jnp.ones((num_mice, num_epochs), dtype=bool)
 
@@ -87,7 +100,8 @@ def run_sweep(data_dir,
             
         # Create a bootstrapped dataset
         key = jr.PRNGKey(i)
-        bootstrap_inds = jr.choice(key, num_mice, shape=(num_mice,), replace=True)
+        # bootstrap_inds = jr.choice(key, num_mice, shape=(num_mice,), replace=True)
+        bootstrap_inds = bootstrap(key, drugs)
         bootstrap_X = X[bootstrap_inds]
         
         # Initialize wandb run
