@@ -66,7 +66,7 @@ def bootstrap(key, groups):
 
 @click.command()
 @click.option('--data_dir', default="/home/groups/swl1/swl1", help='path to folder where data is stored.')
-@click.option('--results_dir', default="/home/groups/swl1/swl1/dirichlet-tucker/analysis/serotonin/results/2024_06_14-11_15-bootstrap", help='path to folder where results are stored.')
+@click.option('--results_dir', default="/home/groups/swl1/swl1/dirichlet-tucker/analysis/serotonin/results/2024_06_28-10_20-bootstrap", help='path to folder where results are stored.')
 @click.option('--km', default=22, help='number of mouse factors.')
 @click.option('--kn', default=4, help='number of epoch factors.')
 @click.option('--kp', default=4, help='number of position factors.')
