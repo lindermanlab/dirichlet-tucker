@@ -6,12 +6,12 @@ from setuptools import setup, find_packages
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 DISTNAME = 'dtd'
-DESCRIPTION = 'Code for fitting Dirichlet-Tucker decompositions.'
+DESCRIPTION = 'Dirichlet Tucker decomposition for discrete behavioral sequence motifs.'
 with open('README.md') as fp:
     LONG_DESCRIPTION = fp.read()
 MAINTAINER = 'Scott Linderman'
 MAINTAINER_EMAIL = 'scott.linderman@stanford.edu'
-URL = ''
+URL = 'https://github.com/lindermanlab/dirichlet-tucker'
 LICENSE = 'MIT'
 DOWNLOAD_URL = ''
 VERSION = '0.0.1'
@@ -40,7 +40,7 @@ if __name__ == "__main__":
               'Operating System :: POSIX',
               'Operating System :: Unix',
               'Operating System :: MacOS',
-              'Programming Language :: Python :: 3.7',
+              'Programming Language :: Python :: 3.9',
           ],
           packages=find_packages(),
           )
