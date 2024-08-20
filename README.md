@@ -44,10 +44,20 @@ The following branches (in varying states of active development) currently exist
     - Currently kept in a separate branch due to active development; will be merged into the `main` upon completion
 These branches will be eventually merged in to the `main` branch.
 
-The source code (`./dtd/`) is manually kept in-sync with the main branch.
-Selective merging into a target branch (whether updating the main branch or
-porting new changes into a working branch) is executed with the following:
+ ## Dataset structure
+ We apply DTD to several datasets to demonstrate its broad applicability and various extensions. 
+
+To maintain a common interface, the provided dataloader expects data to be structured as follows:
 ```
-git checkout BRANCH_TO_MERGE_INTO
-git checkout --patch BRANCH_TO_MERGE_FROM FOLDER_OR_PATH_TO_MERGE
+- <dataset>/
+| - <session_1>.npz
+| - <session_2>.npz
+| - ...
 ```
+where within in each archive, there `N+1` arrays, where `N` is the number of modes (or more colloquially, "dimensions") of the tensor:
+- `tensor` : The `N`-mode data tensor with shape `(d1, d2, d3,...)`
+- `mode_0` : Labels or ids for the first mode, shape `(d1,)`
+- `mode_1` : Labels or ids for the second mode, shape `(d2,)`
+- `mode_2` : Labels or ids for the third mode, shape `(d3,)`
+- and so on for additional modes
+
