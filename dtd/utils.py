@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Union
-from jaxtyping import Array
+from jax import Array
 
 import itertools
 from pathlib import Path

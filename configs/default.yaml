@@ -1,0 +1,30 @@
+logging:
+  wandb_project: test-minmax-scaled-kf-cv
+  output_dir: ${oc.env:TEMP_OUTPUT_DIR}
+
+dataset: 
+  type: "concatenate_sessions"  # how to combine sessions
+  data_dir: ${oc.env:KILLIFISH_DATA_DIR}
+  transform_method: "minmax_scaled_frequency"
+  transform_kwargs: null
+  event_ndim: 1
+  batch_ndim: 2
+  
+cross_validation:
+  seed: 123
+  mask_method: "speckle"
+  mask_kwargs: null
+  test_frac: 0.2  # fraction of subjects to hold-out out
+  val_frac: 0.2  # fraction of held-in subjects to mask out
+
+fit:
+  seed: 42  # seed for initializing model
+  method: full
+  n_epochs: 2500
+
+model:
+  k1: 20
+  k2: 4
+  k3: 10
+  alpha: 1.1  # Concentration of Dirichlet prior
+  
