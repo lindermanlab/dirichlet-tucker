@@ -90,7 +90,7 @@ def construct_subject_concatenated_kf(
     holdout_subjects_names: Optional[Sequence[str]]=None,
     masking_method: Literal["speckle"]="speckle",
     masking_kwargs: Optional[dict]=None,
-    transform_method: Literal["minmax", "frequency"]="minmax",
+    transform_method: Optional[Literal["minmax", "frequency"]]="minmax",
     transform_kwargs: Optional[dict]=None,
     key: KeyArray,
 ):
@@ -131,7 +131,7 @@ def construct_subject_concatenated_kf(
     masking_kwargs: dict or None. default=None.
         Keyword arguments for masking method. See docstring for specified method.
 
-    transform_method: {"minmax", "frequency"}. default="minmax"
+    transform_method: {"minmax", "frequency"} or None. default="minmax"
         Transform method for transforming data tensor:
         - "minmax": Scale data to fall within (0,1) along specifed axis,
           ``(X - X.max(axis=axis)) / (X.max(axis=axis) - X.min(axis=axis))``.
@@ -139,6 +139,7 @@ def construct_subject_concatenated_kf(
           scales them down into a fixed range.
         - "frequency": Standardize data to sum to 1 along specified axis, 
           ``X / X.sum(axis=axis)``
+        - If None, do nothing.
     
     transform_kwargs: dict. default=None.
         Keywork arguments for transform method. See docstring for specified method.
@@ -236,6 +237,8 @@ def construct_subject_concatenated_kf(
         transform = make_minmax_transform(holdin_data, **transform_kwargs)
     elif transform_method == "frequency":
         transform = make_frequency_transform(holdin_data, **transform_kwargs)
+    elif transform_method is None:
+        transform = lambda arr: jnp.asarray(arr, dtype=float)
     data = transform(data)
 
     return {'data': data, 'mask': mask, 'mode_0': mode_0, 'mode_1': mode_1, 'mode_2': mode_2}
