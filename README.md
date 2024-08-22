@@ -60,4 +60,3 @@ where within in each archive, there `N+1` arrays, where `N` is the number of mod
 - `mode_1` : Labels or ids for the second mode, shape `(d2,)`
 - `mode_2` : Labels or ids for the third mode, shape `(d3,)`
 - and so on for additional modes
-
