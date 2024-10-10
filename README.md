@@ -16,13 +16,19 @@ conda activate dtd
 # ---------------------
 pip install -U "jax[cuda12]"  # CPU-install available; see: https://jax.readthedocs.io/en/latest/installation.html
 pip install torch --index-url https://download.pytorch.org/whl/cpu  # for dataloading
-pip install pathlib tqdm wandb
+pip install pathlib scikit-learn tfp-nightly tqdm wandb  # NB: use tf-nightly and NOT tensorflow-probability due to warm-fix for KeyArray bug
 
 # ------------------
 # Install this repo
 # ------------------
 git clone git@github.com:lindermanlab/dirichlet-tucker.git
 pip install [-e] dirichlet-tucker  # Optional [-e] flag creates an editable installation
+
+# ----------------------------------
+# Visualization + Jupyter notebooks
+# ----------------------------------
+pip install ipykernel
+pip install matplotlib seaborn
 ```
 
 The full package list with exact package versions used are found in `requirements.txt`
