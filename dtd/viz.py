@@ -188,3 +188,75 @@ def set_time_within_session_ticks(
         print(f"WARNING: axis {axis} not recognized. Expected one of 'x' or 'y'.")
     
     return
+
+
+def draw_drug_class_boxes(
+    drug_class: Sequence,
+    bbox_x: float=-0.1,
+    bbox_w: float=1.2,
+    label: bool=True,
+    label_kwargs: dict|None=None,
+    axis: Literal['y']='y', 
+    ax: mpl.axes.Axes=None,
+):
+    """Annotate session axis with drug class boxes.
+
+    Sessions must be on y-axis. 
+
+    Used for Wiltschko et al. 2022 drug dataset.
+
+    Parameters
+        drug_class (sequence): Drug class names, length (n_sessions,)
+        bbox_x (flaot): Drug class bounding box left coord, in units of axis fraction.
+        bbox_w (float): Drug class bounding box width, in units of axis fraction.
+        label (bool): If True, label classes. Else, just draw bounding boxes.
+        label_kwargs (dict, optional): Text keyword arguments for tick labels.
+        axis (literal): Axis to add ticks to. Default: 'x'
+        ax (mpl.axes.Axes | None)
+
+    """
+
+    if ax is None:
+        ax = polt.gca()
+
+    if label_kwargs is None:
+        label_kwargs = dict(
+            va='center', ha='right', rotation=0,
+        )
+
+    # -----------------------------------------------------------------------------------
+    # Get unique instances of drug class names. Note that these results are sorted
+    # alphanumerically. Each element is length (n_unique,)
+    unique_names, indices, counts = \
+        onp.unique(drug_class, return_index=True, return_counts=True)
+
+    # Ensure that class labels and counts are in the original order
+    indices = onp.argsort(indices)
+    unique_names = [unique_names[i] for i in indices]
+    counts = onp.array([counts[i] for i in indices])
+
+    # Calculate location of cluster edges and centers
+    edges = onp.cumsum(counts)
+    centers = onp.cumsum(counts) - counts/2
+
+    # -----------------------------------------------------------------------------------
+    for i, color in enumerate(mpl.colormaps['Set2'].colors[:len(unique_names)]):
+        # Draw bounding box
+        y0 = edges[i-1] if i > 0 else 0
+        y1 = edges[i]
+        
+        rect = mpl.patches.Rectangle(
+            (bbox_x, y0+0.1), bbox_w, y1-y0-0.2,
+            transform=ax.get_yaxis_transform(),
+            lw=2, ec=color, fc='none', clip_on=False, zorder=20)
+        ax.add_patch(rect)
+
+        if label:
+            ax.text(
+                bbox_x-0.1, centers[i], unique_names[i],
+                transform=ax.get_yaxis_transform(), clip_on=False,
+                bbox=dict(facecolor=color, boxstyle='square,pad=0.2'),
+                **label_kwargs
+            )
+
+    return
