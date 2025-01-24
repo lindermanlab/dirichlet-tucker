@@ -42,5 +42,5 @@ if __name__ == "__main__":
               'Operating System :: MacOS',
               'Programming Language :: Python :: 3.7',
           ],
-          packages=find_packages(),
+          packages=find_packages(where=DISTNAME),
           )
