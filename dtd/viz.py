@@ -260,3 +260,46 @@ def draw_drug_class_boxes(
             )
 
     return
+
+BUFFERED_MASK_CMAP = mpl.colors.ListedColormap(["white", "gray", "xkcd:pumpkin"])
+BUFFERED_MASK_CMAP_LABELS = ("train", "buffer", "test")
+
+def plot_buffered_mask(
+    holdout_mask, buffer_mask,
+    max_sessions_per_col=100,
+    cax_width_ratio = 0.1,
+    fig=None,
+):
+
+    # Construct axes
+    n_sessions, n_timebins = holdout_mask.shape
+    ncols = n_sessions//max_sessions_per_col + (n_sessions%max_sessions_per_col > 0)
+    if fig is None:
+        fig, axs = plt.subplots(
+            ncols=ncols+1, width_ratios=(1,)*ncols+(cax_width_ratio,),
+        )
+    else:
+        axs = fig.subplots(
+            ncols=ncols+1, width_ratios=(1,)*ncols+(cax_width_ratio,),
+        )
+    
+    axs, cax = axs[:-1], axs[-1]
+
+    merged_mask = 2*holdout_mask + buffer_mask
+    for i, ax in enumerate(axs):
+        i_start = i * max_sessions_per_col
+        i_end = i_start + max_sessions_per_col
+
+        im = ax.imshow(
+            merged_mask[i_start:i_end],
+            aspect="auto", interpolation='none',
+            cmap=BUFFERED_MASK_CMAP, clim=(0,3),
+        )
+
+        ax.set_yticks([])
+        ax.set_title(f"{i_start}-{i_end}")
+    
+    plt.colorbar(im, cax=cax, ticks=onp.arange(3)+0.5)
+    cax.set_yticklabels(BUFFERED_MASK_CMAP_LABELS)
+
+    return fig, onp.concatenate([axs, [cax,]])
