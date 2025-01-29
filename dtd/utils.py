@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional, Union
 from jaxtyping import Array
 
+from math import prod
 import itertools
 from pathlib import Path
 import shutil
@@ -193,3 +194,127 @@ def download_wnb_params(entity: str,
     params = onp.load(true_path/'params.npz', allow_pickle=True)
 
     return {k: params[k] for k in params.files}
+
+
+def create_block_speckled_mask(
+    rng: onp.random.Generator,
+    batch_shape: Sequence[int],
+    block_shape: int | Sequence[int]=1,
+    buffer_size: int | Sequence[int]=0,
+    n_blocks: int=None,
+    frac_mask: float=None,
+    exact: bool=False,
+):
+    """Create block speckled mask and buffer.
+
+    Block speckling allows for masking consecutive subblocks of entries, and buffering
+    reduces correlation between held-in and held-out data. This is useful for more
+    accurately evaluating model performance on data with spatial or temporal correlations.
+
+    Overlapping blocks are merged together and a buffer is created for the merged blocks.
+    
+    This function is not jit compatible and is implemented using numpy random generation.
+    It uses in-place array assignment, for-loop iterations, and list comprehension.
+
+    Default parameters of block_shape=1 and buffer_size=0 recovers "speckled" masking;
+    see [Wold, 1978] and [Williams, 2018].
+
+    Start index randomization and ND-slicing based on `get_block_mask` implementation by
+    Cayco-Gajic lab accompanying [Pellegrino et al. 2023].
+        https://github.com/caycogajiclab/sliceTCA_paper/blob/62b0ca1267fe9d615111a193080577eda601687e/run_sliceTCA/core/utilities.py#L56
+    This implementation includes explicit creation of a buffer mask.
+
+    Parameters
+        rng (onp.random.Generator): Numpy random Generator.
+        batch_shape (Sequence[int]): Shape to create mask for.
+        block_shape (Sequence[int] | int): Block shape to mask out. If int, value is
+            repeated across all dimensions. Default: 1, single element.
+        buffer_size (Sequence[int] | int)): Amount to mask out for buffering on _each_
+            side of the block. If int, value is repeated across all dimensions.
+            Default: 0, no buffer.
+        n_blocks (int): Number of blocks to create. Mutually exclusive with `frac_mask`;
+            only one of the two may be specified.
+        frac_mask (float): Fraction of `batch_shape` to mask out. Mutually exculsive with
+            `n_blocks`; only one of the two may be specified.
+        exact (bool): If True, create exactly the number of blocks specified by
+            `n_blocks` or `frac_mask`; this approach may be slower for large batch shapes.
+            Typically guaranteed to create the same number of blocks each time. If False,
+            create _approximately_ the number of blocks specified by `n_blocks` or `frac_mask`.
+            Not guaranteed to create the same number of blocks each time. Default: False
+
+    Returns
+        mask (onp.array): shape (*batch_shape), bool dtype
+            Boolean array indicating which entries to hold out for validation.
+        buffer (onp.array): shape (*batch_shape), bool dtype
+            Boolean array indicating which entires to discard from validation.
+
+    References
+        [Pellegrino et al. 2024] "Dimensionality reduction beyond neural subspaces with
+            slice tensor component analysis." Nature Neuroscience, 27, 1199-1210.
+        [Williams, 2018.] "How to cross-validate PCA, clustering, and matrix decomposition
+            models." Personal blog, 2018 Feb 26, updated 2019 Sept 17.
+            https://alexhwilliams.info/itsneuronalblog/2018/02/26/crossval/
+        [Wold, 1978.] "Cross-Validatory Estimation of the Number of Components in Factor
+        and Principal Components Models." Technometrics, 20, 397-405.
+        
+    """
+
+    assert not ((n_blocks is not None) and (frac_mask is not None)), \
+        f"Expected one of `n_blocks` or `frac_mask` to be specified, got {n_blocks=} and {frac_mask=}."
+    assert not ((n_blocks is None) and (frac_mask is None)), \
+        f"Only one of `n_blocks` or `frac_mask` may be specified, got {n_blocks=} and {frac_mask=}."
+
+    # Standardize block_shape and buffer_size into sequences
+    ndim = len(batch_shape)
+    if isinstance(block_shape, int):
+        block_shape = (block_shape,) * ndim
+    if isinstance(buffer_size, int):
+        buffer_size = (buffer_size,) * ndim
+
+    total_volume = prod(batch_shape)
+    buffered_block_volume = prod(onp.array(block_shape) + 2*onp.array(buffer_size))
+
+    # Convert frac_mask into n_blocks
+    if frac_mask is not None:
+        n_blocks = int(frac_mask * prod(batch_shape) / buffered_block_volume)
+
+    # Calculate max indices to avoid index out of range
+    max_indices = onp.array(batch_shape) - (onp.array(block_shape) + 2*onp.array(buffer_size)) + 1
+    flat_max_index = prod(max_indices)
+
+    # Get start indices of blocks
+    if exact:
+        is_start_index = onp.concatenate(
+            [onp.ones(n_blocks, dtype=bool), onp.zeros(flat_max_index-n_blocks, dtype=bool)]
+        )
+        is_start_index = rng.permutation(is_start_index)
+        is_start_index = is_start_index.reshape(*max_indices)
+    
+    else:
+        p = n_blocks / flat_max_index
+        is_start_index = rng.binomial(1, p, size=max_indices)  # = Bernoulli distr
+
+    # Create masks
+    mask = onp.zeros(batch_shape, dtype=bool)
+    buffer = onp.zeros(batch_shape, dtype=bool)
+    for start_indices in zip(*onp.nonzero(is_start_index)):
+        start_indices = onp.asarray(start_indices) + buffer_size  # account for ante-buffer
+
+        # Construct multi-dimensional slices to mask out block
+        ndslices = [
+            slice(start_indices[d], start_indices[d]+block_shape[d]) for d in range(ndim)
+        ]
+        mask[*ndslices] = True
+
+        # Construct multi-dimensional slices to mask out block + buffer
+        # "Fill in" the masked area as well; we will unmask areas later
+        ndslices = [
+            slice(start_indices[d]-buffer_size[d], start_indices[d]+block_shape[d]+buffer_size[d])
+            for d in range(ndim)
+        ]
+        buffer[*ndslices] = True
+
+    # Remove buffer indicator where mask indicator is True
+    buffer = onp.where((mask == 1) & (buffer == 1), 0, buffer)
+
+    return mask, buffer

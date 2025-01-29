@@ -1,8 +1,14 @@
 import pytest
+
+from math import prod
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as onp
 
-from dtd.utils import ShuffleIndicesIterator
+from dtd.utils import (
+    create_block_speckled_mask,
+    ShuffleIndicesIterator
+)
 
 def test_iterator(batch_shape=(8,4), 
                   minibatch_size=6,
@@ -27,3 +33,38 @@ def test_iterator(batch_shape=(8,4),
         f"Expected `batched_indices` from different iterations to be different"
     assert jnp.any(jnp.all(remaining_indices_1==remaining_indices_2, axis=-1)) == False, \
         f"Expected `batched_indices` from different iterations to be different"
+
+
+@pytest.mark.parametrize("n_blocks, frac_mask", [(10, None), (None, 0.1)])
+@pytest.mark.parametrize("exact", [True, False])
+def test_create_block_speckled_mask(
+    n_blocks, frac_mask, exact,
+):
+    """Test that that create_block_speckled_mask exactly recovers vanilla speckled masking."""
+
+    batch_shape = (50,20)
+    block_shape = 1
+    buffer_sizes = 0
+
+    rng = onp.random.default_rng(seed=0)
+    n_blocks_ = n_blocks if n_blocks is not None else int(frac_mask * prod(batch_shape))
+    if exact:
+        refr = onp.concatenate([
+            onp.ones(n_blocks_, dtype=bool),
+            onp.zeros(prod(batch_shape)-n_blocks_, dtype=bool)
+        ])
+        refr = rng.permutation(refr)
+        refr = refr.reshape(*batch_shape)
+    else:
+        p = n_blocks_ / prod(batch_shape)
+        refr = rng.binomial(1, p, size=batch_shape)
+
+    # Reset RNG and check
+    rng = onp.random.default_rng(seed=0)
+    mask, buffer = create_block_speckled_mask(
+        rng, batch_shape, block_shape, buffer_sizes,
+        n_blocks=n_blocks, frac_mask=frac_mask, exact=exact
+    )
+
+    assert buffer.sum() == 0
+    assert onp.all(refr==mask)
