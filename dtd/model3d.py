@@ -33,30 +33,36 @@ class DirichletTuckerDecomp:
         self.batch_ndims = 2
         self.event_ndims = 1
 
-    def sample_params(self, key, M, N, P):
+    def sample_params(self, key, M, N, P, conc=None):
         """Sample a data tensor and parameters from the model.
 
         Args:
         key: jr.PRNGKey
         M, N, P: dimensions of the data
+        conc (float): Concentration parameter of Dirichlet distribution from which to
+            sample core tensor and factor matrices. This can be useful, for example, to
+            sample sparse initial parameters (conc <= 1.0). If None, use the prior
+            concentration of the model (which must be conc > 1.0 for evaluating log prob).
 
         Returns:
-            params = (G, Psi, Phi, Theta) where
-                G: (K_M, K_N, K_P) core tensor
-                Psi: (M, K_M) factor
-                Phi: (N, K_N) factor
-                Theta: (K_P, P) topic (note transposed!)
+            G: (K_M, K_N, K_P) core tensor
+            Psi: (M, K_M) factor
+            Phi: (N, K_N) factor
+            Theta: (K_P, P) topic (note transposed!)
         """
+        if conc is None:
+            conc = self.alpha
+            
         # TODO: This function is stupidly slow!
         K_M, K_N, K_P = self.K_M, self.K_N, self.K_P
 
         # Sample parameters from the prior
         k1, k2, k3, k4, k5 = jr.split(key, 5)
-        G = tfd.Dirichlet(self.alpha * jnp.ones(K_P)).sample(seed=k1, sample_shape=(K_M, K_N,))
-        Psi = tfd.Dirichlet(self.alpha * jnp.ones(K_M)).sample(seed=k2, sample_shape=(M,))
-        Phi = tfd.Dirichlet(self.alpha * jnp.ones(K_N)).sample(seed=k3, sample_shape=(N,))
-        Theta = tfd.Dirichlet(self.alpha * jnp.ones(P)).sample(seed=k4, sample_shape=(K_P,))
-        return (G, Psi, Phi, Theta)
+        G = tfd.Dirichlet(conc * jnp.ones(K_P)).sample(seed=k1, sample_shape=(K_M, K_N,))
+        Psi = tfd.Dirichlet(conc * jnp.ones(K_M)).sample(seed=k2, sample_shape=(M,))
+        Phi = tfd.Dirichlet(conc * jnp.ones(K_N)).sample(seed=k3, sample_shape=(N,))
+        Theta = tfd.Dirichlet(conc * jnp.ones(P)).sample(seed=k4, sample_shape=(K_P,))
+        return G, Psi, Phi, Theta
 
     def sample_data(self, key, params):
         """Sample a data tensor and parameters from the model.
