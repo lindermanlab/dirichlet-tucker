@@ -204,6 +204,7 @@ def create_block_speckled_mask(
     buffer_size: int | Sequence[int]=0,
     n_blocks: int=None,
     frac_mask: float=None,
+    frac_include_buffer: bool=True,
     exact: bool=False,
 ):
     """Create block speckled mask and buffer.
@@ -237,6 +238,10 @@ def create_block_speckled_mask(
             only one of the two may be specified.
         frac_mask (float): Fraction of `batch_shape` to mask out. Mutually exculsive with
             `n_blocks`; only one of the two may be specified.
+        frac_include_buffer (bool): Whether to include buffered elements when calculating
+            number of blocks from `frac_mask`. If True (default); include buffer; this
+            results in a smaller effective test split. Else, do not include buffer; this
+            results in a smaller effective training split.
         exact (bool): If True, create exactly the number of blocks specified by
             `n_blocks` or `frac_mask`; this approach may be slower for large batch shapes.
             Typically guaranteed to create the same number of blocks each time. If False,
@@ -271,13 +276,14 @@ def create_block_speckled_mask(
         block_shape = (block_shape,) * ndim
     if isinstance(buffer_size, int):
         buffer_size = (buffer_size,) * ndim
-
-    total_volume = prod(batch_shape)
-    buffered_block_volume = prod(onp.array(block_shape) + 2*onp.array(buffer_size))
-
+    
     # Convert frac_mask into n_blocks
     if frac_mask is not None:
-        n_blocks = int(frac_mask * prod(batch_shape) / buffered_block_volume)
+        block_volume = onp.array(block_shape)
+        block_volume += 2*onp.array(buffer_size) if frac_include_buffer else 0
+        block_volume = prod(block_volume)
+
+        n_blocks = int(frac_mask * prod(batch_shape) / block_volume)
 
     # Calculate max indices to avoid index out of range
     max_indices = onp.array(batch_shape) - (onp.array(block_shape) + 2*onp.array(buffer_size)) + 1
