@@ -97,18 +97,19 @@ def get_wnb_project_df(entity: str,
                        config_keys: list[str],
                        summary_keys: list[str]
                        ) -> pd.DataFrame:
-    """Retrieve WandB <entity/project> configs and results.
+    """Retrieve configs and results of all runs associated with a WandB project.
 
+    Unique run id and human-readable name are automatically downloaded.
     
     Parameters
-        entity: WandB entity (user) name
-        project: WandB project name
-        config_keys: List of run configuration (e.g. hyperparameter) to load
-        summary_keys: List of run summary (e.g. results) to load
+        entity (str): WandB entity (user) name
+        project (str): WandB project name
+        config_keys (list[str]): List of run configuration (e.g. hyperparameter) to load
+        summary_keys (list[str]): List of run summary (e.g. results) to load
     
     Returns
         pd.DataFrame, with config and summaries, plus
-            - id: unique id, used for download files associated wiht run
+            - id: unique id, used for download files associated with run
             - name: human readable name, used in wandb gui
     """
 
