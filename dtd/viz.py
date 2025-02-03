@@ -67,7 +67,9 @@ def set_syllable_cluster_ticks(
             ax.set_xticklabels(labels, ha='center', va='center', **ticklabel_kwargs)
             
             # Hide label tick, add padding from axis
-            ax.tick_params(axis='x', which='major', length=0, pad=10)
+            ax.tick_params(axis='x', which='major',
+                           bottom=True, labelbottom=True,
+                           length=0, pad=10)
         else:
             ax.tick_params(axis='x', which='major', bottom=False, labelbottom=False)
         
@@ -178,11 +180,15 @@ def set_time_within_session_ticks(
         ax.set_xticks(ticks)
         if label:
             ax.set_xticklabels(tick_labels, **ticklabel_kwargs)
+        else:
+            ax.set_xticklabels([])
 
     elif axis == 'y':
         ax.set_yticks(ticks)
         if label:
             ax.set_yticklabels(tick_labels, **ticklabel_kwargs)
+        else:
+            ax.set_yticklabels([])
 
     else:
         print(f"WARNING: axis {axis} not recognized. Expected one of 'x' or 'y'.")
@@ -258,6 +264,8 @@ def draw_drug_class_boxes(
                 bbox=dict(facecolor=color, boxstyle='square,pad=0.2'),
                 **label_kwargs
             )
+        else:
+            ax.set_yticklabels([])
 
     return
 
