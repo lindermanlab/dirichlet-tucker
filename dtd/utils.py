@@ -215,7 +215,7 @@ def create_block_speckled_mask(
 
     Overlapping blocks are merged together and a buffer is created for the merged blocks.
     
-    This function is not jit compatible and is implemented using numpy random generation.
+    This function is NOT jit compatible and is implemented using numpy random generation.
     It uses in-place array assignment, for-loop iterations, and list comprehension.
 
     Default parameters of block_shape=1 and buffer_size=0 recovers "speckled" masking;
@@ -276,7 +276,7 @@ def create_block_speckled_mask(
         block_shape = (block_shape,) * ndim
     if isinstance(buffer_size, int):
         buffer_size = (buffer_size,) * ndim
-    
+
     # Convert frac_mask into n_blocks
     if frac_mask is not None:
         block_volume = onp.array(block_shape)
@@ -285,6 +285,14 @@ def create_block_speckled_mask(
 
         n_blocks = int(frac_mask * prod(batch_shape) / block_volume)
 
+    # Add short-circuit if no masking required
+    if n_blocks == 0:
+        mask = onp.zeros(batch_shape, dtype=bool)
+        buffer = onp.zeros(batch_shape, dtype=bool)
+
+        return mask, buffer
+
+    # --------------------------------------------------------------------------------------------
     # Calculate max indices to avoid index out of range
     max_indices = onp.array(batch_shape) - (onp.array(block_shape) + 2*onp.array(buffer_size)) + 1
     flat_max_index = prod(max_indices)
