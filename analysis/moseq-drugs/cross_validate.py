@@ -474,20 +474,42 @@ if __name__ == "__main__":
     output_base_dir = Path(f"/scratch/users/eyz/")
     
     # # ------------------------------------------------------------------
-    # Re-use run_sweep to run with multi-init fit
-    project_name = "moseq-dtd-fit-20250130"
-    k1_sweep = [20]
-    k2_sweep = [4]
-    k3_sweep = [30]
-    max_kfolds = 10  # number of initializations
-    #  seed = 20250130  # first 5 runs, originally forgot to update max kfolds
-    seed = 20250129
+    # Vanilla speckle only, no-hold out
+    project_name = "moseq-dtd-sweep-20250211-vanilla-speckle-2"
+
+    k1_sweep = [5,10,20,30,40]
+    k2_sweep = [2,4,8]  # can't do k2=1, tfd.Dirichlet throws error that conc must have event size of at least 2
+    k3_sweep = [5,10,20,30,40,50]
+    vldtn_block_shape = (1,1)
+    vldtn_buffer_size = (0,0)
 
     run_sweep(
-        filepath, project_name, output_base_dir, k1_sweep, k2_sweep, k3_sweep,
-        vldtn_frac=0.0, test_frac=0.0,
-        seed=seed
+        filepath, project_name, output_base_dir,
+        k1_sweep, k2_sweep, k3_sweep,
+        vldtn_frac=0.20, vldtn_frac_include_buffer=False,
+        vldtn_block_shape=vldtn_block_shape, vldtn_buffer_size=vldtn_buffer_size,
+        test_frac=0.0,
     )
+
+
+    # ====================================================================
+    # Sequence speckle only, no-hold out
+
+    # # ------------------------------------------------------------------
+    # # Re-use run_sweep to run with multi-init fit
+    # project_name = "moseq-dtd-fit-20250130"
+    # k1_sweep = [20]
+    # k2_sweep = [4]
+    # k3_sweep = [30]
+    # max_kfolds = 10  # number of initializations
+    # #  seed = 20250130  # first 5 runs, originally forgot to update max kfolds
+    # seed = 20250129
+
+    # run_sweep(
+    #     filepath, project_name, output_base_dir, k1_sweep, k2_sweep, k3_sweep,
+    #     vldtn_frac=0.0, test_frac=0.0,
+    #     seed=seed
+    # )
 
     # # ------------------------------------------------------------------
     # # SWEEP WITH vldtn_frac = 0.20, test_frac=0.0
