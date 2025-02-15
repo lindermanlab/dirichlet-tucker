@@ -223,7 +223,7 @@ def draw_drug_class_boxes(
     """
 
     if ax is None:
-        ax = polt.gca()
+        ax = plt.gca()
 
     if label_kwargs is None:
         label_kwargs = dict(
