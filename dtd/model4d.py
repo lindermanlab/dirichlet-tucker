@@ -178,6 +178,9 @@ class DirichletTuckerDecomp:
     # Fit the model!
     def fit(self, X, mask, init_params, num_iters, tol=1e-4):
 
+        # Cast integer-valued count tensor as float dtype for future numerical operations
+        X = jnp.asarray(X, dtype=float)
+        
         @jit
         def em_step(X, mask, params):
             E_params = self.e_step(X, mask, params)

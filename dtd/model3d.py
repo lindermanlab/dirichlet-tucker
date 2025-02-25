@@ -279,6 +279,9 @@ class DirichletTuckerDecomp:
 
         event_size = prod(X.shape[-self.event_ndims:])
 
+        # Cast integer-valued count tensor as float dtype for future numerical operations
+        X = jnp.asarray(X, dtype=float)
+
         @jit
         def em_step(X, mask, params):
             E_params = self.e_step(X, mask, params)
