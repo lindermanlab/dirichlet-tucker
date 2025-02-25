@@ -330,6 +330,6 @@ def create_block_speckled_mask(
         buffer[*ndslices] = True
 
     # Remove buffer indicator where mask indicator is True
-    buffer = onp.where((mask == 1) & (buffer == 1), 0, buffer)
+    buffer = onp.where((mask == True) & (buffer == True), False, buffer)
 
     return mask, buffer
