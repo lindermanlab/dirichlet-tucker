@@ -1,9 +1,10 @@
 import warnings
+from math import prod
 import jax.numpy as jnp
 import jax.random as jr
-from tensorflow_probability.substrates import jax as tfp
 from jax import jit, lax
 from jax.tree_util import tree_map
+from tensorflow_probability.substrates import jax as tfp
 from tqdm.auto import trange
 import itertools
 import time
@@ -276,6 +277,8 @@ class DirichletTuckerDecomp:
     # Fit the model!
     def fit(self, X, mask, init_params, num_iters, wnb=None):
 
+        event_size = prod(X.shape[-self.event_ndims:])
+
         @jit
         def em_step(X, mask, params):
             E_params = self.e_step(X, mask, params)
@@ -296,7 +299,7 @@ class DirichletTuckerDecomp:
 
             # Log metrics to WandB
             if wnb is not None:
-                wnb.log({'avg_lp': lp / mask.sum(), 'epoch':itr},
+                wnb.log({'avg_lp': lp / mask.sum() / event_size, 'epoch':itr},
                         step=itr, commit=False)
                 wnb.log({'epoch_time': epoch_elapsed_time, 'epoch':itr},
                         step=itr, commit=True)
