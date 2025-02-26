@@ -96,8 +96,9 @@ class ShuffleIndicesIterator():
     
 def get_wnb_project_df(entity: str,
                        project: str,
-                       config_keys: list[str],
-                       summary_keys: list[str]
+                       config_keys: list[str]=None,
+                       summary_keys: list[str]=None,
+                       log_keys: list[str]=None,
                        ) -> pd.DataFrame:
     """Retrieve configs and results of all runs associated with a WandB project.
 
@@ -108,6 +109,11 @@ def get_wnb_project_df(entity: str,
         project (str): WandB project name
         config_keys (list[str]): List of run configuration (e.g. hyperparameter) to load
         summary_keys (list[str]): List of run summary (e.g. results) to load
+        log_keys (list[str]): List of logged run summaries to load, specified as `<key>.<subkey>`.
+            For example, values such as `avg_lp` are logged during each iteration of
+            training but we're only interested in the final value. This value is stored as
+                run.summary['avg_lp'] = {'min': <val>}
+            so we query by requesting ['avg_lp.min'].
     
     Returns
         pd.DataFrame, with config and summaries, plus
@@ -115,20 +121,28 @@ def get_wnb_project_df(entity: str,
             - name: human readable name, used in wandb gui
     """
 
+    config_keys = [] if config_keys is None else config_keys
+    summary_keys = [] if summary_keys is None else summary_keys
+    log_keys = [] if log_keys is None else log_keys
+
     runs = wandb.Api().runs(f"{entity}/{project}")
 
     run_results = {
-        key: [] for key in itertools.chain(['id', 'name'], config_keys, summary_keys)
+        key: [] for key in itertools.chain(['id', 'name'], config_keys, summary_keys, log_keys)
     }
     for run in runs:
+        # run.config contains the hyperparameters.
+        for key in config_keys:
+            run_results[key].append(run.config[key])
+
         # run.summary contains the output keys/values for metrics like accuracy.
         # use `get`` to catch NaN runs (e.g. due to OOM)
         for key in summary_keys:
             run_results[key].append(run.summary.get(key,))
-
-        # run.config contains the hyperparameters.
-        for key in config_keys:
-            run_results[key].append(run.config[key])
+        
+        for key in log_keys:
+            key1, key2 = key.split('.')
+            run_results[key].append(run.summary.get(key1).get(key2))
 
         # 'id' is the unique identifier
         # 'name' is the human-readable name
