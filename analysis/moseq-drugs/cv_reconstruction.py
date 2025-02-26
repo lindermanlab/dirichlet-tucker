@@ -450,8 +450,6 @@ def train_and_eval_and_log_nfolds(
         run_id = wnb.id
         run_dir = output_dir/wandb_project/run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-
-        import pdb; pdb.set_trace()
         
         # ---------------------------------------------------------------------
         # Construct masks
@@ -493,12 +491,6 @@ def train_and_eval_and_log_nfolds(
         wnb.finish()
 
         # Log locally
-        # Note: To save / recover a JAX PRNG key: 
-        #   - key_data_bits = jr.key_data(key)  # uint32 dtype array
-        #   - key = jr.wrap_key_data(key_data_bits)  # prng key array
-        # Note: To save / recover NumPY PRNG
-        #   - generator_state = onp_rng.bit_generator.state  # dict
-        #   - onp_rng = onp.random.default_generator(); onp_rng.bit_generator.state = generator_state
         onp.savez_compressed(run_dir/'params.npz',
                              seed=seed,
                              run_id=run_id,
@@ -512,8 +504,7 @@ def train_and_eval_and_log_nfolds(
 # To be used in conjunction with a WandB Sweep file (.yaml)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--data_path', type=str,
+    parser.add_argument('--data_path', type=str,
         help='Path to .npz file containining binned syllable data.'
     )
     parser.add_argument('--k1', type=int)
