@@ -99,6 +99,7 @@ def get_wnb_project_df(entity: str,
                        config_keys: list[str]=None,
                        summary_keys: list[str]=None,
                        log_keys: list[str]=None,
+                       finished_runs_only: bool=True,
                        ) -> pd.DataFrame:
     """Retrieve configs and results of all runs associated with a WandB project.
 
@@ -114,6 +115,8 @@ def get_wnb_project_df(entity: str,
             training but we're only interested in the final value. This value is stored as
                 run.summary['avg_lp'] = {'min': <val>}
             so we query by requesting ['avg_lp.min'].
+        finished_runs_only (bool). Only retrieve results for finished runs;
+            else, retrieve all runs. Default: True. 
     
     Returns
         pd.DataFrame, with config and summaries, plus
@@ -131,6 +134,9 @@ def get_wnb_project_df(entity: str,
         key: [] for key in itertools.chain(['id', 'name'], config_keys, summary_keys, log_keys)
     }
     for run in runs:
+        if finished_runs_only and (run.state != 'finished'):
+            continue
+        
         # run.config contains the hyperparameters.
         for key in config_keys:
             run_results[key].append(run.config[key])
