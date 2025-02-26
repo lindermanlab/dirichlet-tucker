@@ -337,25 +337,23 @@ def create_block_speckled_mask(
     return mask, buffer
 
 
-def get_jax_rng_state(key: KeyArray) -> tuple[int, int]:
-    key_data_bits = jr.key_data(this_key)
+def get_jax_rng_state(key: KeyArray) -> tuple[int,int]:
+    key_data_bits = jr.key_data(key)
     return int(key_data_bits[0]), int(key_data_bits[1])
 
 
-def set_jax_rng_state(state_0: int, state_1: int) -> KeyArray:
-    key_data_bits = jnp.array([state_0, state_1], dtype='uint')
-    return jr.wrap_key_data(key_data_bits)
+def set_jax_rng_state(state: tuple[int,int]) -> KeyArray:
+    return jr.wrap_key_data(jnp.asarray(state, dtype='uint'))
 
 
-def get_numpy_rng_state(rng: onp.random.Generator) -> tuple[int, int]:
+def get_numpy_rng_state(rng: onp.random.Generator) -> dict:
     """Get Numpy random number generator state."""
-    state = rng.bit_generator.state['state']
-    return state['state'], state['inc']
+    return rng.bit_generator.state
 
 
-def set_numpy_rng_state(state: int, inc: int) -> onp.random.Generator:
+def set_numpy_rng_state(state: dict) -> onp.random.Generator:
     """Return NumPy PCG64 random number generator at the indicated state."""
 
-    rng = onp.random.default_generator()
-    rng.bit_generator.state = dict(state=state, inc=inc)
+    rng = onp.random.default_rng()
+    rng.bit_generator.state = state
     return rng

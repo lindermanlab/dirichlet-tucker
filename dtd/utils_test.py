@@ -7,13 +7,16 @@ import numpy as onp
 
 from dtd.utils import (
     create_block_speckled_mask,
-    ShuffleIndicesIterator
+    get_jax_rng_state,
+    get_numpy_rng_state,
+    set_jax_rng_state,
+    set_numpy_rng_state,
+    ShuffleIndicesIterator,
 )
 
 def test_iterator(batch_shape=(8,4), 
                   minibatch_size=6,
-                  seed=0
-                  ):
+                  seed=0):
     """Evaluate full-batch EM fit."""
 
     key = jr.PRNGKey(seed)
@@ -68,3 +71,36 @@ def test_create_block_speckled_mask(
 
     assert buffer.sum() == 0
     assert onp.all(refr==mask)
+
+
+def test_jax_rng_state(batch_shape=(8,4), 
+                  minibatch_size=6,
+                  seed=0):
+    """Evaluate {get,set}_jax_rng_state."""
+
+    key = jr.key(0)
+    rng_state = get_jax_rng_state(key)
+
+    # Ensure the keys are the same
+    recovered_key = set_jax_rng_state(rng_state)
+    assert jnp.all(key==recovered_key)
+
+    # Ensure that they produce the same outputs
+    arr = jr.uniform(key, 5)
+    recovered_arr = jr.uniform(recovered_key, 5)
+    assert all(arr==recovered_arr)
+
+
+def test_numpy_rng_state(batch_shape=(8,4), 
+                  minibatch_size=6,
+                  seed=0):
+    """Evaluate {get,set}_jax_rng_state."""
+
+    rng = onp.random.default_rng(seed=0)
+    rng_state = get_numpy_rng_state(rng)
+    recovered_rng = set_numpy_rng_state(rng_state)
+
+    # Ensure that they produce the same outputs
+    arr = rng.uniform(size=5)
+    recovered_arr = recovered_rng.uniform(size=5)
+    assert all(arr==recovered_arr)
