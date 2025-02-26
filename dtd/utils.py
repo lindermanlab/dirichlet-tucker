@@ -1,18 +1,20 @@
 from __future__ import annotations
 from typing import Optional, Union
-from jaxtyping import Array
 
 from math import prod
 import itertools
 from pathlib import Path
 import shutil
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as onp
 
 import pandas as pd
 import wandb
+
+KeyArray = jax.Array  # Under the hood, jax._src.prng.PRNGKeyArray
 
 def calculate_minibatch_size(d1,d2,d3,k1,k2,k3,mem_gb,mem_frac=0.75):
     """Calculate minibatch size that maximizes available memory.
@@ -333,3 +335,27 @@ def create_block_speckled_mask(
     buffer = onp.where((mask == True) & (buffer == True), False, buffer)
 
     return mask, buffer
+
+
+def get_jax_rng_state(key: KeyArray) -> tuple[int, int]:
+    key_data_bits = jr.key_data(this_key)
+    return int(key_data_bits[0]), int(key_data_bits[1])
+
+
+def set_jax_rng_state(state_0: int, state_1: int) -> KeyArray:
+    key_data_bits = jnp.array([state_0, state_1], dtype='uint')
+    return jr.wrap_key_data(key_data_bits)
+
+
+def get_numpy_rng_state(rng: onp.random.Generator) -> tuple[int, int]:
+    """Get Numpy random number generator state."""
+    state = rng.bit_generator.state
+    return state['state'], state['inc']
+
+
+def set_numpy_rng_state(state: int, inc: int) -> onp.random.Generator:
+    """Return NumPy PCG64 random number generator at the indicated state."""
+
+    rng = onp.random.default_generator()
+    rng.bit_generator.state = dict(state=state, inc=inc)
+    return rng
