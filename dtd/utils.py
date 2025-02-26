@@ -349,7 +349,7 @@ def set_jax_rng_state(state_0: int, state_1: int) -> KeyArray:
 
 def get_numpy_rng_state(rng: onp.random.Generator) -> tuple[int, int]:
     """Get Numpy random number generator state."""
-    state = rng.bit_generator.state
+    state = rng.bit_generator.state['state']
     return state['state'], state['inc']
 
 
