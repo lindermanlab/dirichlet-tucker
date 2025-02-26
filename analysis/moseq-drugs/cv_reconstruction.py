@@ -476,12 +476,12 @@ def train_and_eval_and_log_nfolds(
         pbar.set_postfix(train_lp=avg_train_lps[-1], test_ll=avg_test_ll)
 
         # Visualize
-        fig = make_summary_figure(
-            params, avg_train_lps, holdout_mask, buffer_mask, figsize=(8.5,11), dpi=120
-        )
-        fig_path = run_dir/'summary.png'
-        plt.savefig(fig_path, bbox_inches='tight')
-        plt.close()
+        # fig = make_summary_figure(
+        #     params, avg_train_lps, holdout_mask, buffer_mask, figsize=(8.5,11), dpi=120
+        # )
+        # fig_path = run_dir/'summary.png'
+        # plt.savefig(fig_path, bbox_inches='tight')
+        # plt.close()
 
         # ---------------------------------------------------------------------
         # Save results
@@ -489,7 +489,7 @@ def train_and_eval_and_log_nfolds(
         # Log to WandB
         wnb.summary['run_time_minutes'] = run_elapsed_time/60
         wnb.summary["avg_test_ll"] = avg_test_ll
-        wnb.save(str(fig_path), base_path=str(run_dir), policy="now")  # save figure as file
+        # wnb.save(str(fig_path), base_path=str(run_dir), policy="now")  # save figure as file
         wnb.finish()
 
         # Log locally
