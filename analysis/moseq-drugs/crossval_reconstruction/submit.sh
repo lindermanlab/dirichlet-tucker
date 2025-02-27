@@ -17,9 +17,9 @@ echo SLURM_JOB_ID $SLURM_JOB_ID
 echo
 
 # INSTRUCTIONS
-# 1. Update sweep file, config_grid.yaml
+# 1. Update sweep file, config.yaml
 # 2. Initialize sweep and note the sweep id
-#       > wandb sweep config_grid.yaml
+#       > wandb sweep config.yaml
 # 3. Submit job script with WANDB_SWEEP_ID <sweep_id>
 #       > sbatch --export=WANDB_SWEEP_ID=<sweep_id> submit.sh
 
