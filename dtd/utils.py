@@ -100,6 +100,7 @@ def get_wnb_project_df(entity: str,
                        summary_keys: list[str]=None,
                        log_keys: list[str]=None,
                        finished_runs_only: bool=True,
+                       timeout: Optional[int]=None,
                        ) -> pd.DataFrame:
     """Retrieve configs and results of all runs associated with a WandB project.
 
@@ -117,6 +118,8 @@ def get_wnb_project_df(entity: str,
             so we query by requesting ['avg_lp.min'].
         finished_runs_only (bool). Only retrieve results for finished runs;
             else, retrieve all runs. Default: True. 
+        timeout (int). API timeout value. Increase if running into Timeout errors.
+            Default: None, use default wandb value (19).
     
     Returns
         pd.DataFrame, with config and summaries, plus
@@ -128,7 +131,7 @@ def get_wnb_project_df(entity: str,
     summary_keys = [] if summary_keys is None else summary_keys
     log_keys = [] if log_keys is None else log_keys
 
-    runs = wandb.Api().runs(f"{entity}/{project}")
+    runs = wandb.Api(timeout=timeout).runs(f"{entity}/{project}")
 
     run_results = {
         key: [] for key in itertools.chain(['id', 'name'], config_keys, summary_keys, log_keys)
