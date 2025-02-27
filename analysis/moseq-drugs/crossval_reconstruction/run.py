@@ -1,6 +1,14 @@
 """Cross-validate model parameters on held-out reconstruction error.
 
-Some parameters of this file need to be manually edited.
+NOTE: This file fits the model with the given configuration for N different train/test splits.
+Each split is associated with its own run. This works automatically when calling the script on its own,
+    python run.py --k1 <k1> --k2 <k2> --k3 <k3> --n_folds <N>
+
+However, running this script via a WandB sweep instance with N>1 does NOT work --
+the results from the latest split will overwrite the previous results.
+Issue: https://community.wandb.ai/t/runs-are-overwritten-when-launched-with-wandb-sweep/9091
+
+Current work around: Run script with `--n_folds <N>` and instead launch N sweeps.
 """
 from typing import Optional
 from jax import Array
@@ -427,7 +435,6 @@ def train_and_eval_and_log_nfolds(
         # ---------------------------------------------------------------------
         # Setup WandB and local logging
         # ---------------------------------------------------------------------
-        project_dir = output_dir/wandb_project/"wandb"
         wnb = wandb.init(
             project=wandb_project,
             name="DEBUG" if wandb_debug else None,
@@ -441,8 +448,7 @@ def train_and_eval_and_log_nfolds(
                 onp_rng_state=get_numpy_rng_state(onp_rng),
                 jax_rng_state=get_jax_rng_state(this_jax_key),
             ),
-            resume="allow",
-            dir=str(project_dir),  # absolute path to directory with experimental logs
+            dir=str(output_dir/wandb_project/"wandb"),  # abs path to experimental logs dir
         )
         wandb.define_metric('avg_lp', summary='min')
 
@@ -498,6 +504,13 @@ def train_and_eval_and_log_nfolds(
                              avg_train_lps=avg_train_lps,
                              avg_test_ll=avg_test_ll
                              )
+        
+        # Wait wandb run is synced and actually finished
+        pause = 0
+        while (wandb.run is not None):
+            print(f"Waiting for wandb run to sync...({pause} s elapsed time)")
+            time.sleep(5)
+            pause =+ 5
 
     return
 
