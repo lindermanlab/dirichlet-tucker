@@ -4,14 +4,12 @@
 #SBATCH --nodes=1 --ntasks=1
 #SBATCH --gpus=1
 #SBATCH --mem-per-gpu=8G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --mail-type END
 #SBATCH --mail-type FAIL
 #SBATCH --output=/scratch/users/eyz/tmp/slurm/moseq-%j.out
 #SBATCH --error=/scratch/users/eyz/tmp/slurm/moseq-%j.out
-
-
-# DON"T NEED #SBATCH --array=[1-5]
+#SBATCH --array=[1-5]
 
 echo SLURM_ARRAY_JOB_ID $SLURM_ARRAY_JOB_ID
 echo SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID
@@ -24,7 +22,6 @@ echo
 #       > wandb sweep config_grid.yaml
 # 3. Submit job script with WANDB_SWEEP_ID <sweep_id>
 #       > sbatch --export=WANDB_SWEEP_ID=<sweep_id> submit.sh
-export WANDB_PROJECT=moseq-dtd-sweep-20250225
 
 echo WANDB_SWEEP_ID $WANDB_SWEEP_ID
 
@@ -38,7 +35,7 @@ echo -n "Using "
 which python
 
 # Launch job
-cd /home/groups/swl1/eyz/dirichlet-tucker/analysis/moseq-drugs/crossval_reconstruction
+export WANDB_PROJECT=moseq-dtd-sweep-20250225
 wandb agent eyz/$WANDB_PROJECT/$WANDB_SWEEP_ID
 
 # For debugging

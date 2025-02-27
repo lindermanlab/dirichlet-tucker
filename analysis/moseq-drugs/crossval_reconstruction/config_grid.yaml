@@ -3,7 +3,7 @@ project: moseq-dtd-sweep-20250225
 method: grid
 parameters:
   k1:
-    values: [24, 48] # [2,4,8,16,32,64,96,128,256]
+    values: [2,4,8,16,24,32,48,64,96,128,256]
   k2:
     values: [2,4,6,8,16,20]
   k3:
