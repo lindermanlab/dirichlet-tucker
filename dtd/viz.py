@@ -17,6 +17,8 @@ def set_syllable_cluster_ticks(
     ax: mpl.axes.Axes=None,
 ):
     """Annotate syllable axis with feature similarity cluster names.
+
+    DEPRECATED. Use `.set_cluster_edge_ticks` which has the same functionality.
     
     Parameters
         cluster_names (sequence): Syllable cluster name, length (n_syllables,)
@@ -90,6 +92,125 @@ def set_syllable_cluster_ticks(
 
             ax.set_yticks(cluster_centers)
             ax.set_yticklabels(labels, ha='right', va='center', **ticklabel_kwargs)
+            
+            # Hide label tick, add padding from axis
+            ax.tick_params(axis='y', which='major', length=0, pad=5)
+        else:
+            ax.tick_params(axis='y', which='minor', length=9)  # Set short cluster tick dividers
+            
+            ax.tick_params(axis='y', which='major', left=False, labelleft=False)
+        
+        if grid:
+            ax.grid(axis='y', which='minor', **grid_kwargs)
+
+    else:
+        print(f"WARNING: axis {axis} not recognized. Expected one of 'x' or 'y'.")
+    
+    return
+
+def set_cluster_edge_ticks(
+    cluster_names: Sequence[str]=None,
+    cluster_edges: Sequence[float]=None,
+    cluster_labels: Sequence[str]=None,
+    label: bool=True,
+    offset: float=-0.5,
+    grid: bool=True,
+    ticklabel_kwargs: dict | None=None,
+    grid_kwargs: dict | None=None,
+    axis: Literal['x','y']='x', 
+    ax: mpl.axes.Axes=None,
+):
+    """Labels axis ticks of clustered elements by cluster label.
+
+    Same function as `set_syllable_tick_clusters`, but re-written to be more generic.
+    
+    Either `cluster_names` or `cluster_edges` must be passed in. If both are passed in,
+    `cluster_names` are ignored.
+
+    Parameters
+        cluster_names (Sequence[str]): length (n_samples, ). Dense cluster names,
+            e.g. ['A','A','A','B','B','C','D','D'].
+        cluster_edges (Sequence): Cluster edges, length (n_cluster+1,), e.g. [0,3,5,6,8].
+        cluster_labels (Sequence[str]): length (n_clusters,). Unique cluster names,
+            e.g. ['A', B', C','D']. Ignored if cluster_names is not None.
+        label (bool): If True, label cluster groups. Else, just draw edges.
+        offset (float): Offset to add to edge calculation. Default: -0.5, suitable for
+            annotating axes of matrix visualized via imshow.
+        grid (bool): If True, draw lines across image indicate cluster boundaries,.
+        ticklabel_kwargs (dict, optional): Text keyword arguments for tick labels.
+        grid_kwargs (dict, optional): Line keyword arguments for cluster boundaries.
+        axis (literal): Axis to add ticks to. Default: 'x'
+        ax (mpl.axes.Axes | None)
+    """
+
+    if (cluster_names is None) and (cluster_edges is None):
+        raise ValueError(f"One of 'cluster_names' or 'cluster_edges' must not be None.")
+
+    if ax is None:
+        ax = plt.gca()
+
+    if ticklabel_kwargs is None:
+        ticklabel_kwargs = dict()
+    ticklabel_kwargs = DEFAULT_TICKLABEL_KWARGS | ticklabel_kwargs
+
+    if grid_kwargs is None:
+        grid_kwargs = dict(color='0.6', ls='--', alpha=0.5)
+
+    if cluster_edges is None:
+        # Get unique instances of cluster names. Note that these are sorted
+        # alphanumerically. Each element length (n_unique,)
+        cluster_labels, indices, counts = \
+            onp.unique(cluster_names, return_index=True, return_counts=True)
+
+        # Sort results into the the order that they were seen
+        indices = onp.argsort(indices)
+        cluster_labels = [str(cluster_labels[i]) for i in indices]
+        counts = onp.array([counts[i] for i in indices])
+
+        # Calculate location of cluster edges and centers
+        cluster_edges = onp.cumsum(counts)
+    
+    cluster_edges += offset
+    cluster_centers = cluster_edges[:-1] + 0.5 * (cluster_edges[1:] - cluster_edges[:-1])
+
+    if cluster_labels is None:
+        cluster_labels = [f'{i}' for i in range(len(cluster_centers))]
+
+    # Label axis
+    if axis == 'x':
+        # Break long cluster names into two lines
+        cluster_labels = [lbl.replace(" ", "\n") for lbl in cluster_labels]
+
+        # Set boundary ticks; extend tick length
+        ax.set_xticks(cluster_edges[1:-1], minor=True)
+        ax.tick_params(axis='x', which='minor', length=18)
+
+        # Set labels
+        if label:
+            ax.set_xticks(cluster_centers)
+            ax.set_xticklabels(cluster_labels, ha='center', va='center', **ticklabel_kwargs)
+            
+            # Hide label tick, add padding from axis
+            ax.tick_params(axis='x', which='major', bottom=True, labelbottom=True, length=0, pad=10)
+
+            # import pdb; pdb.set_trace()
+        else:
+            ax.tick_params(axis='x', which='major', bottom=False, labelbottom=False)
+        
+        # Add grid lines
+        if grid:
+            ax.grid(axis='x', which='minor', **grid_kwargs)
+    
+    elif axis == 'y':
+        # Set boundary ticks; extend tick length
+        ax.set_yticks(cluster_edges[1:-1], minor=True)
+
+        # Set labels
+        if label:
+            ax.tick_params(axis='y', which='minor', length=18)  # Set long cluster dividers
+
+            ax.set_yticks(cluster_centers)
+            ax.set_yticklabels(cluster_labels, ha='right', va='center', **ticklabel_kwargs)
             
             # Hide label tick, add padding from axis
             ax.tick_params(axis='y', which='major', length=0, pad=5)
