@@ -1,0 +1,20 @@
+program: run.py
+project: moseq-dtd-prediction-20250227
+method: grid
+parameters:
+  seed:
+    value: 13
+  target_name:
+    values: [drug, dose, class]
+  model_name:
+    values: [lda, dtd]
+  model_dim:
+    values: [2, 4, 8, 16, 24, 36, 48, 64, 96, 128, 256]
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - ${args}
+  - "--file_path=/home/groups/swl1/eyz/data/moseq-drugs/syllable_binned_1min.npz"
+  - "--output_dir=/home/groups/swl1/eyz/dirichlet-tucker/analysis/moseq-drugs/crossval_prediction/results"
+  - "--use_wandb"
