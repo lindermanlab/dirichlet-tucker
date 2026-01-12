@@ -63,7 +63,7 @@ def fit_model(key, X, mask, K_M, K_N, K_P, K_S, alpha, num_iters, tol):
 @click.option('--tol', default=1e-4, help='tolerance for EM convergence')
 @click.option('--test_frac', default=0.25, help='fraction of mice to withhold for testing')
 @click.option('--seed', default=0, help='random seed')
-@click.option('--wandb_project', default="serotonin-behavior-bootstrap", help='wandb project name')
+@click.option('--wandb_project', default="serotonin-behavior-heldout", help='wandb project name')
 def run_sweep(data_dir, 
               results_dir, 
               km, 
@@ -93,8 +93,6 @@ def run_sweep(data_dir,
     mask = jnp.zeros(num_mice, dtype=bool)
     mask = mask.at[test_inds].set(True)
     train_data = data[~mask]
-    
-    
 
     # Initialize wandb run
     run = wandb.init(
